@@ -1,0 +1,561 @@
+# 第12章 权限模式详解：从 Plan 到 Auto
+
+> **前置知识**：第4章 Agentic Loop、第6章 权限系统  
+> **关键文件**：`src/types/permissions.ts`、`src/utils/permissions/PermissionMode.ts`、`src/utils/permissions/permissionSetup.ts`、`src/utils/permissions/getNextPermissionMode.ts`、`src/utils/permissions/yoloClassifier.ts`、`src/tools/ExitPlanModeTool/`、`src/tools/EnterPlanModeTool/`
+
+---
+
+## 12.1 为什么需要多种模式
+
+用户和 AI 之间的"信任程度"天然不是二元的。考虑以下场景：
+
+- **探索阶段**：用户只想看 AI 的思路，不想让它动任何文件
+- **日常协作**：用户愿意让 AI 写文件，但想审批每条 shell 命令
+- **熟悉任务**：用户已经了解任务风险，不想被频繁打断
+- **CI/CD 环境**：根本没有人在场，需要全自动运行
+
+Cursor 用 **Ask / Agent / Plan** 这样按"意图"划分的模式解决这个问题。Claude Code 选择了不同的维度——按**权限粒度**划分，从"什么都不允许"到"什么都允许"形成一个完整的连续谱。
+
+本章将深入每种模式的实现原理。
+
+---
+
+## 12.2 五种权限模式全景
+
+```typescript
+// src/types/permissions.ts
+export const EXTERNAL_PERMISSION_MODES = [
+  'acceptEdits',        // 模式2：自动接受文件编辑
+  'bypassPermissions',  // 模式4：完全绕过权限检查
+  'default',            // 模式1：默认，危险操作询问
+  'dontAsk',            // 模式3.5：不再询问（当前会话）
+  'plan',               // 模式0：只读探索，不执行
+] as const
+
+// 内部专有模式（仅 Anthropic 内部用户）
+export type InternalPermissionMode = ExternalPermissionMode | 'auto' | 'bubble'
+```
+
+用 `Shift+Tab` 循环切换时，顺序如下（见 `src/utils/permissions/getNextPermissionMode.ts`）：
+
+```
+default  →  acceptEdits  →  plan  →  (bypassPermissions)  →  (auto)  →  default
+```
+
+---
+
+## 12.3 模式0：Plan Mode（计划模式）
+
+### 12.3.1 核心思想
+
+Plan Mode 是 Claude Code 最具特色的模式。它的核心约束极其简单：**AI 只能读，不能写**。它的价值在于给用户一个"干跑（dry run）"的机会，在任何真实修改发生之前，先看到 AI 的完整行动方案。
+
+### 12.3.2 进入 Plan Mode 的三种路径
+
+**路径一：用户手动触发 `/plan` 命令**
+
+```typescript
+// src/commands/plan/plan.tsx
+export async function call(onDone, context, args) {
+  const currentMode = appState.toolPermissionContext.mode;
+
+  if (currentMode !== 'plan') {
+    // 1. 通知状态管理层（发送遥测、触发动画）
+    handlePlanModeTransition(currentMode, 'plan');
+    // 2. 更新不可变的权限上下文
+    setAppState(prev => ({
+      ...prev,
+      toolPermissionContext: applyPermissionUpdate(
+        prepareContextForPlanMode(prev.toolPermissionContext),
+        { type: 'setMode', mode: 'plan', destination: 'session' }
+      ),
+    }));
+  }
+}
+```
+
+**路径二：AI 主动调用 `EnterPlanMode` 工具**
+
+这是最有趣的路径——AI 自己决定何时需要先计划。工具的提示词（`src/tools/EnterPlanModeTool/prompt.ts`）教 AI 在以下情况下主动进入计划模式：
+
+- 任务有多种合理实现方案
+- 需要修改 3 个以上的文件
+- 需求模糊，需要先探索
+- 用户说"帮我重构"这种宽泛指令
+
+**路径三：CLI 参数 `--permission-mode plan`**
+
+直接以计划模式启动整个会话，适合"只让 AI 分析，永远不执行"的只读工作流。
+
+### 12.3.3 Plan Mode 的内部机制
+
+进入 Plan Mode 时，`prepareContextForPlanMode()` 做了几件关键事：
+
+```typescript
+// src/utils/permissions/permissionSetup.ts
+export function prepareContextForPlanMode(
+  context: ToolPermissionContext,
+): ToolPermissionContext {
+  const currentMode = context.mode;
+  if (currentMode === 'plan') return context;
+
+  // 关键：把当前模式存入 prePlanMode，退出时恢复
+  return { ...context, prePlanMode: currentMode };
+}
+```
+
+`prePlanMode` 的作用是"模式快照"——无论用户在什么模式下进入 Plan，退出时都能精确回到原来的模式，而不是统一退回 `default`。
+
+### 12.3.4 Plan Mode 的执行时提示词注入
+
+进入 Plan Mode 后，每轮对话都会向 AI 注入一段强制性的系统提示（`src/utils/messages.ts`）：
+
+```
+Plan mode is active. The user indicated that they do not want you to execute 
+yet -- you MUST NOT make any edits (with the exception of the plan file 
+mentioned below), run any non-readonly tools (including changing configs or 
+making commits), or otherwise make any changes to the system. This supercedes 
+any other instructions you have received.
+```
+
+这段提示的关键字是 **"supercedes any other instructions"**——它的优先级高于用户的其他指令。这防止了"用户不小心说了一句'顺便把这个文件改一下'"导致 Plan Mode 被绕过。
+
+唯一的例外：AI 可以写**计划文件**（`PLAN.md`），这是 Plan Mode 中唯一允许的写操作。
+
+### 12.3.5 两种计划工作流
+
+两种工作流通过同一个入口函数切换，核心是 `messages.ts` 里的 `getPlanModeV2Instructions()`：
+
+```typescript
+// src/utils/messages.ts
+function getPlanModeV2Instructions(attachment) {
+  if (attachment.isSubAgent) return []          // 子 Agent 不注入计划指令
+
+  // 关键分叉：根据 feature flag 选择工作流
+  if (isPlanModeInterviewPhaseEnabled()) {
+    return getPlanModeInterviewInstructions(attachment)  // 迭代访谈工作流
+  }
+  // 否则走经典 5 阶段工作流（下面的代码）
+  ...
+}
+```
+
+#### 控制开关
+
+```typescript
+// src/utils/planModeV2.ts
+export function isPlanModeInterviewPhaseEnabled(): boolean {
+  if (process.env.USER_TYPE === 'ant') return true   // 内部用户永远启用
+
+  const env = process.env.CLAUDE_CODE_PLAN_MODE_INTERVIEW_PHASE
+  if (isEnvTruthy(env)) return true                  // 环境变量强制开
+  if (isEnvDefinedFalsy(env)) return false           // 环境变量强制关
+
+  return getFeatureValue_CACHED_MAY_BE_STALE(        // GrowthBook 灰度
+    'tengu_plan_mode_interview_phase',
+    false,
+  )
+}
+```
+
+三级优先级：Anthropic 内部用户（永远开）> 环境变量 > GrowthBook 远程灰度。
+
+#### 工作流 A：经典 5 阶段（`isPlanModeInterviewPhaseEnabled()` = false）
+
+AI 收到的提示词要求分 5 个阶段：
+
+```
+Phase 1: 派生最多 N 个 explore agent 并行探索代码库
+Phase 2: 派生 plan agent 设计方案
+Phase 3: 审查方案，用 AskUserQuestion 补充疑问
+Phase 4: 写入计划文件（格式严格，限 40 行，不写背景段落）
+Phase 5: 调用 ExitPlanMode 请求审批
+```
+
+探索 agent 的数量由订阅套餐决定（`getPlanModeV2AgentCount()`）：Max 20x 和企业版/团队版返回 3，其余返回 1。
+
+#### 工作流 B：迭代访谈（`isPlanModeInterviewPhaseEnabled()` = true，内部用户默认）
+
+AI 收到的提示词是一个循环，而不是线性阶段：
+
+```
+### The Loop
+
+Repeat this cycle until the plan is complete:
+
+1. Explore — 读代码，寻找可复用的函数和模式
+2. Update the plan file — 每次发现后立即写入，不等到最后
+3. Ask the user — 遇到无法从代码推断的决策时，用 AskUserQuestion
+```
+
+第一轮有额外约束：**先快速扫几个文件，写出计划骨架，然后立刻问用户问题**——不允许"把代码探索完了再来问"。
+
+计划格式也更宽松：需要包含 Context（为什么改）、推荐方案、文件路径、可复用函数（带行号引用）、验证步骤，没有行数上限。
+
+#### 两种工作流的本质差异
+
+| 维度 | 经典 5 阶段 | 迭代访谈（内部默认） |
+|------|-------------|----------------------|
+| **探索方式** | 派生 explore agent 并行搜索 | AI 直接读文件，可选用 agent |
+| **与用户互动时机** | Phase 3 才问问题 | **第一轮就开始问** |
+| **计划文件写入** | Phase 4 统一输出 | **边探索边写入** |
+| **计划格式** | 严格：40 行、不写背景 | 宽松：分节，含 Context |
+
+无论哪种工作流，**每轮对话只能以两种方式结束**：`AskUserQuestion`（还有问题）或 `ExitPlanMode`（计划完成）。后续轮次还会注入一段精简提示（`getPlanModeV2SparseInstructions()`）提醒 AI 当前仍在计划模式，并说明应遵循哪种工作流：
+
+```typescript
+const workflowDescription = isPlanModeInterviewPhaseEnabled()
+  ? 'Follow iterative workflow: explore codebase, interview user, write to plan incrementally.'
+  : 'Follow 5-phase workflow.'
+```
+
+### 12.3.6 ExitPlanMode：用户审批流程
+
+`ExitPlanMode` 工具（V2 版本）本身**不接受计划内容作为参数**，它只是一个"我写完了，来看看"的信号。系统从计划文件中读取内容展示给用户。
+
+用户在审批弹窗（`ExitPlanModePermissionRequest`）中有以下选项：
+
+| 选项 | 含义 | 退出后的权限模式 |
+|------|------|-----------------|
+| `yes-default-keep-context` | 批准，保持当前对话上下文 | `default`（需逐一确认） |
+| `yes-accept-edits` | 批准，清空上下文后开始 | `acceptEdits`（文件编辑自动通过） |
+| `yes-accept-edits-keep-context` | 批准，保持上下文 | `acceptEdits` |
+| `yes-bypass-permissions` | 批准，全自动执行 | `bypassPermissions` |
+| `yes-resume-auto-mode` | 批准，用 AI 分类器决策 | `auto`（内部用户） |
+| `ultraplan` | 发送到云端 CCR 执行 | 远程会话 |
+| `no` | 拒绝，AI 继续在 Plan Mode 修改 | `plan`（保持） |
+
+用户批准时，计划文件内容被嵌入 tool_result 发回给 AI：
+
+```
+User has approved your plan. You can now start coding.
+
+## Approved Plan:
+<plan content here>
+```
+
+这告诉 AI："计划被批准了，现在可以开始执行了"。
+
+### 12.3.7 Plan Mode + 多 Agent 协作
+
+当 `COORDINATOR_MODE` 启用且任务可并行时，`ExitPlanMode` 的审批信息里还会提示：
+
+```
+If this plan can be broken down into multiple independent tasks, 
+consider using the TeamCreate tool to create a team and parallelize the work.
+```
+
+AI 可以在计划批准后立即拆分任务，派生多个子 Agent 并行执行（详见第7章）。
+
+---
+
+## 12.4 模式1：Default Mode（默认模式）
+
+### 12.4.1 核心行为
+
+Default 模式是最接近"有条件信任"的模式：
+
+- **只读操作**（`FileRead`、`Glob`、`Grep`）：自动允许
+- **文件编辑**（`FileEdit`、`FileWrite`）：弹窗询问
+- **Shell 命令**：根据命令解析结果决定
+  - 纯读操作命令（`ls`、`cat`、`git status` 等）：自动允许
+  - 写操作命令（`rm`、`git commit` 等）：弹窗询问
+
+### 12.4.2 Bash 命令的"只读检测"
+
+BashTool 有一个精心维护的**只读命令白名单**（`src/tools/BashTool/readOnlyValidation.ts`），涵盖超过 100 个安全命令：
+
+```typescript
+const READONLY_COMMANDS = [
+  'ls', 'cat', 'head', 'tail', 'grep', 'find', 'pwd', 'echo',
+  'git status', 'git log', 'git diff', 'git show', 'git branch',
+  'npm list', 'yarn list',
+  // ... 100+ 更多
+]
+```
+
+对于不在白名单的命令，还会进行**基于 AST 的安全分析**（使用 tree-sitter 解析 bash 语法树），检测：
+- 命令注入（shell 替换、管道链）
+- 重定向到文件（`>`、`>>`）
+- 执行任意脚本（`eval`、`source`）
+
+### 12.4.3 工作目录边界
+
+Default 模式下，文件操作被严格限制在**授权目录**内：
+
+```typescript
+// src/utils/permissions/filesystem.ts
+// 只有 cwd 和通过 /add-dir 添加的目录才能访问
+// 尝试访问 /etc/passwd 会被硬性拒绝，无法通过规则绕过
+```
+
+这是一条**硬边界**——即使用户配置了 `alwaysAllowRules`，也无法跨越工作目录边界。
+
+---
+
+## 12.5 模式2：Accept Edits（接受编辑模式）
+
+### 12.5.1 核心行为
+
+Accept Edits 模式在 Default 基础上，自动批准**所有文件编辑操作**：
+
+- `FileEdit`、`FileWrite`、`NotebookEdit`：**自动允许**（无需确认）
+- 同时，以下 Bash 文件系统命令也自动允许（`src/tools/BashTool/modeValidation.ts`）：
+
+```typescript
+const ACCEPT_EDITS_ALLOWED_COMMANDS = [
+  'mkdir',   // 创建目录
+  'touch',   // 创建空文件
+  'rm',      // 删除文件/目录
+  'rmdir',   // 删除空目录
+  'mv',      // 移动/重命名
+  'cp',      // 复制
+  'sed',     // 流编辑（允许 -i 原地修改）
+] as const
+```
+
+注意：`sed` 命令的允许是有条件的——即使在 Accept Edits 模式下，`sed` 的危险操作（`w`/`W` 写入文件、`e`/`E` 执行命令）仍然会被拦截（`src/tools/BashTool/sedValidation.ts`）。
+
+### 12.5.2 适用场景
+
+Accept Edits 是"我信任这个 AI 写代码，但还是想对非文件操作保持警惕"的最佳平衡点。典型使用场景：
+
+- **重构代码**：文件修改不需要确认，但 `git push` 这样的命令还是要审批
+- **批量格式化**：自动执行大量文件的格式化修改
+
+---
+
+## 12.6 模式3：Bypass Permissions（绕过权限模式）
+
+### 12.6.1 核心行为
+
+Bypass Permissions 完全跳过所有权限检查，等价于"我完全信任 AI"。
+
+**启用条件**：必须显式指定 `--dangerously-skip-permissions`（CLI 参数）或在设置中允许。
+
+**适用场景**：无人值守的 CI/CD 环境。
+
+### 12.6.2 安全防线
+
+即使在 Bypass Permissions 模式下，也有两个无法绕过的安全机制：
+
+1. **工作目录边界**：仍然无法访问授权目录之外的文件
+2. **Yolo 分类器（可选）**：Anthropic 内部有一个额外的 AI 安全分类器，即使在 bypass 模式下也能对可疑操作发出警告
+
+### 12.6.3 Yolo 分类器
+
+这是 Claude Code 对全自动执行风险的安全补偿机制（`src/utils/permissions/yoloClassifier.ts`）：
+
+```typescript
+// 两阶段分类器设计
+type TwoStageMode = 'both' | 'fast' | 'thinking'
+
+// 第一阶段（fast）：轻量模型，0-50ms
+// - 判断常见安全操作（git status、读文件等）→ 直接允许
+// - 判断明显危险操作（rm -rf /、curl | sh）→ 直接阻止
+// - 不确定 → 进入第二阶段
+
+// 第二阶段（thinking）：使用 Extended Thinking，500-2000ms
+// - 分析完整会话历史和当前操作的上下文
+// - 评估意图是否与用户最初的任务一致
+// - 输出：shouldBlock: boolean + reason: string
+```
+
+**分类器的快捷路径**（避免不必要的推理）：
+
+```typescript
+// src/utils/permissions/permissions.ts
+// 快捷路径 1：如果这个操作在 acceptEdits 模式下会被允许，直接通过
+const acceptEditsResult = await tool.checkPermissions(parsedInput, { mode: 'acceptEdits' });
+if (acceptEditsResult.behavior === 'allow') {
+  return { behavior: 'allow', ... };
+}
+
+// 快捷路径 2：工具在安全白名单中（FileRead、Glob、Grep 等），直接通过
+if (classifierDecisionModule.isAutoModeAllowlistedTool(tool.name)) {
+  return { behavior: 'allow', ... };
+}
+
+// 以上都不满足 → 调用 classifyYoloAction()
+```
+
+---
+
+## 12.7 模式4：Auto Mode（自动模式，内部特性）
+
+Auto Mode 是 `TRANSCRIPT_CLASSIFIER` Feature Flag 控制的内部模式，目前仅对 Anthropic 内部用户（`USER_TYPE === 'ant'`）开放。它代表了 Claude Code 对"智能权限决策"的最新探索。
+
+### 12.7.1 核心思想
+
+Auto Mode 不是简单地"允许一切"，而是用**另一个 AI 实例**实时评估每个操作的安全性，取代人工确认。用户设定意图（"允许写测试文件"、"不允许推送到远程"），分类器在此边界内自主决策。
+
+### 12.7.2 进入 Auto Mode 的条件
+
+```typescript
+// src/utils/permissions/getNextPermissionMode.ts
+function canCycleToAuto(ctx: ToolPermissionContext): boolean {
+  if (feature('TRANSCRIPT_CLASSIFIER')) {
+    const gateEnabled = isAutoModeGateEnabled();     // GrowthBook 远程开关
+    const can = !!ctx.isAutoModeAvailable && gateEnabled;
+    return can;
+  }
+  return false;
+}
+```
+
+两个条件缺一不可：
+1. `ctx.isAutoModeAvailable`：启动时检查（模型是否支持、账户是否开启）
+2. `isAutoModeGateEnabled()`：GrowthBook 实时远程开关（支持熔断）
+
+### 12.7.3 危险权限剥离
+
+进入 Auto Mode 时，有一个重要的安全动作——**剥离用户已预配置的危险权限规则**：
+
+```typescript
+// src/utils/permissions/permissionSetup.ts
+export function stripDangerousPermissionsForAutoMode(
+  context: ToolPermissionContext,
+): ToolPermissionContext {
+  // 把允许执行任意代码的规则从 alwaysAllowRules 中移除
+  // 保存到 strippedDangerousRules，退出 Auto Mode 时恢复
+  // 这防止用户配置的宽泛规则（如 Bash(*））绕过分类器
+}
+```
+
+举例：如果用户之前配置了 `Bash(*)` 规则（允许任何 bash 命令），在 Auto Mode 下这条规则会被临时移除，强制所有 bash 命令经过分类器评估。
+
+### 12.7.4 Auto Mode + Plan Mode 的组合
+
+`shouldPlanUseAutoMode()` 允许在 Plan Mode 下也启用 Auto Mode 的分类器语义：
+
+```typescript
+// 用户可以在计划阶段就使用分类器自动决策
+// 这意味着 Plan Mode 里的读操作也会经过分类器
+// 目的：让分类器学习任务上下文，为后续执行阶段做准备
+```
+
+### 12.7.5 Auto Mode 的连续拒绝保护
+
+一个防止分类器"过于谨慎"而陷入死循环的机制：
+
+```typescript
+// src/utils/permissions/denialTracking.ts
+type DenialTrackingState = {
+  consecutiveDenials: number;   // 连续拒绝次数
+  lastDenialToolName: string;
+}
+
+// 如果分类器连续拒绝太多次，触发 shouldFallbackToPrompting()
+// 回退到手动弹窗，让用户介入
+```
+
+这防止了一种场景：分类器对某类操作持续拒绝，AI 陷入不断重试的循环，用户无法推进任务。
+
+---
+
+## 12.8 权限决策的完整调用链
+
+一次工具调用的完整权限决策流程，比第6章的描述更详细：
+
+```
+AI 发出 tool_use 请求
+    │
+    ▼
+1. 规则层检查（checkRuleBasedPermissions）
+   │  1a. alwaysDenyRules 匹配 → deny（立即返回）
+   │  1b. alwaysAskRules 匹配（整个工具） → ask
+   │  1c. tool.checkPermissions()（工具自定义逻辑）
+   │      BashTool：解析命令，检查只读白名单
+   │      FileEditTool：检查路径是否在工作目录内
+   │  1d. 如果工具返回 deny → deny
+   │  1e. 如果是 safetyCheck 类型的 ask → 直接 ask（不可绕过）
+   │  1f. alwaysAllowRules 匹配 → allow（规则显式允许）
+    │
+    ▼
+2. 模式层决策（hasPermissionsToUseToolInner 续）
+   │  bypassPermissions → allow（跳过所有检查）
+   │  plan → deny（如果是写操作）
+   │  acceptEdits → allow（如果是文件操作或 ACCEPT_EDITS 命令）
+    │
+    ▼
+3. 还是 ask？进入交互层
+   │  dontAsk 模式 → 直接 deny（不打断用户）
+   │  auto 模式 → 调用 classifyYoloAction()：
+   │    ├─ 快捷路径：acceptEdits 检查 → allow
+   │    ├─ 快捷路径：工具白名单检查 → allow
+   │    └─ 完整分类：两阶段 AI 分类器 → allow 或 deny
+   │  default 模式 → 弹出权限确认框
+    │
+    ▼
+4. 权限确认框（React 组件）
+   │  用户点"允许一次" → allow（不保存规则）
+   │  用户点"始终允许" → allow + 将规则写入 settings.json
+   │  用户点"拒绝" → deny + 可选原因反馈
+   │  用户修改命令 → allow + updatedInput（新命令）
+    │
+    ▼
+5. 执行工具 / 返回拒绝消息给 AI
+```
+
+---
+
+## 12.9 关键设计决策解析
+
+### 为什么权限上下文是不可变的（DeepImmutable）
+
+```typescript
+// src/types/permissions.ts
+export type ToolPermissionContext = DeepReadonly<{
+  mode: PermissionMode;
+  alwaysAllowRules: ToolPermissionRulesBySource;
+  // ...
+}>
+```
+
+`ToolPermissionContext` 被设计为完全不可变的数据结构。这不是"最佳实践"，而是安全防线：
+
+- 工具不能在执行过程中提升自己的权限
+- 并发工具调用之间不会互相干扰权限状态
+- 权限变更必须通过 `applyPermissionUpdate()` 产生新对象，留下可追踪的变更历史
+
+### 为什么 prePlanMode 在退出时才清除
+
+```typescript
+// 退出 Plan Mode 时：
+if (fromMode === 'plan' && toMode !== 'plan' && context.prePlanMode) {
+  return { ...context, prePlanMode: undefined };  // 才清除
+}
+```
+
+`prePlanMode` 在整个 Plan Mode 期间都保留，这允许系统在任何时刻"知道"Plan Mode 之前的状态，而不只是在退出的瞬间。这对 Auto Mode + Plan Mode 组合尤其重要——系统需要知道是否应该在退出 Plan Mode 时恢复 Auto Mode 的分类器。
+
+### 为什么 Bypass Permissions 的进入需要显式同意
+
+```typescript
+// 用户第一次切换到 bypassPermissions 时，弹出警告对话框
+// 用户必须勾选 "我了解风险" 才能进入
+// 这个同意记录在 settings.skipDangerousModePermissionPrompt
+```
+
+这防止了用户通过手误（多按了几下 Shift+Tab）进入危险模式。
+
+---
+
+## 12.10 在源码中找到这些逻辑
+
+| 功能 | 文件 | 关键函数 |
+|------|------|---------|
+| 模式定义与显示 | `src/utils/permissions/PermissionMode.ts` | `PERMISSION_MODE_CONFIG` |
+| 模式循环逻辑 | `src/utils/permissions/getNextPermissionMode.ts` | `getNextPermissionMode()` |
+| 模式切换副作用 | `src/utils/permissions/permissionSetup.ts` | `transitionPermissionMode()` |
+| Plan Mode 上下文准备 | `src/utils/permissions/permissionSetup.ts` | `prepareContextForPlanMode()` |
+| 完整权限决策流 | `src/utils/permissions/permissions.ts` | `hasPermissionsToUseToolInner()` |
+| Bash 模式验证 | `src/tools/BashTool/modeValidation.ts` | `checkPermissionMode()` |
+| Bash 只读命令白名单 | `src/tools/BashTool/readOnlyValidation.ts` | `COMMAND_ALLOWLIST` |
+| Yolo 分类器 | `src/utils/permissions/yoloClassifier.ts` | `classifyYoloAction()` |
+| Plan Mode 提示词 | `src/utils/messages.ts` | `getPlanModeV2Instructions()` |
+| ExitPlanMode 工具 | `src/tools/ExitPlanModeTool/ExitPlanModeV2Tool.ts` | `call()` |
+| EnterPlanMode 工具 | `src/tools/EnterPlanModeTool/EnterPlanModeTool.ts` | `call()` |
+| 退出 Plan 权限弹窗 | `src/components/permissions/ExitPlanModePermissionRequest/` | `buildPermissionUpdates()` |
+| Auto Mode 危险规则剥离 | `src/utils/permissions/permissionSetup.ts` | `stripDangerousPermissionsForAutoMode()` |
+| 连续拒绝保护 | `src/utils/permissions/denialTracking.ts` | `shouldFallbackToPrompting()` |
