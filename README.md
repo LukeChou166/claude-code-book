@@ -21,6 +21,8 @@
 | [第9章](./09-memory-system.md) | 记忆系统：让 AI 跨会话学习 | `memdir/`, `services/SessionMemory/` |
 | [第10章](./10-mcp-integration.md) | MCP 协议集成 | `services/mcp/` |
 | [第11章](./11-session-persistence.md) | 会话持久化与恢复 | `utils/sessionStorage.ts`, `QueryEngine.ts` |
+| [第13章](./13-state-management.md) | 状态管理：极简自研 Store | `state/store.ts`, `state/AppStateStore.ts`, `state/AppState.tsx` |
+| [第14章](./14-error-recovery.md) | 错误处理与恢复机制 | `services/api/withRetry.ts`, `utils/gracefulShutdown.ts`, `utils/abortController.ts` |
 
 ---
 

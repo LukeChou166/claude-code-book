@@ -172,3 +172,37 @@
 | Semantic 数字/布尔 | `src/utils/semanticNumber.ts`, `src/utils/semanticBoolean.ts` |
 | 消息工具函数 | `src/utils/messages.ts` |
 | Token 估算 | `src/services/tokenEstimation.ts` |
+
+---
+
+## 状态管理（第13章）
+
+| 功能 | 文件路径 | 何时查看 |
+|------|----------|---------|
+| Store 基础实现（35行）| `src/state/store.ts` | 理解发布-订阅核心时 |
+| AppState 类型定义（约570行）| `src/state/AppStateStore.ts` | 了解全局状态有哪些字段时 |
+| 默认初始值 | `src/state/AppStateStore.ts` — `getDefaultAppState()` | 理解初始状态来源时 |
+| Provider + 订阅/更新 Hooks | `src/state/AppState.tsx` | 理解 React 如何连接 Store 时 |
+| 副作用集中处理 | `src/state/onChangeAppState.ts` — `onChangeAppState()` | 追查状态变更引发了哪些副作用时 |
+| 派生状态（计算属性）| `src/state/selectors.ts` | 需要从 AppState 计算复合值时 |
+| Slash 命令建议层（读写分离）| `src/context/promptOverlayContext.tsx` | 学习"分离读写 Context"模式时 |
+
+---
+
+## 错误处理与恢复（第14章）
+
+| 功能 | 文件路径 | 何时查看 |
+|------|----------|---------|
+| API 重试核心引擎 | `src/services/api/withRetry.ts` — `withRetry()` | 排查 API 调用为何一直重试/失败时 |
+| 退避延迟计算（jitter）| `src/services/api/withRetry.ts:530` — `getRetryDelay()` | 理解重试间隔如何计算时 |
+| 529 重试来源白名单 | `src/services/api/withRetry.ts:62` — `FOREGROUND_529_RETRY_SOURCES` | 添加新查询源时判断是否应重试 529 |
+| 模型回退错误类型 | `src/services/api/withRetry.ts:160` — `FallbackTriggeredError` | 调试 Opus 过载自动切换 Sonnet 时 |
+| 连接错误详情提取 | `src/services/api/errorUtils.ts` — `extractConnectionErrorDetails()` | 区分 SSL/TCP 错误时 |
+| WebSocket 重连逻辑 | `src/remote/SessionsWebSocket.ts` — `onClose()` | 排查远程会话自动断开时 |
+| 优雅退出主流程 | `src/utils/gracefulShutdown.ts` — `gracefulShutdown()` | 理解 Ctrl+C 后发生了什么时 |
+| 信号处理注册 | `src/utils/gracefulShutdown.ts:237` — `setupGracefulShutdown()` | 了解支持哪些退出信号时 |
+| 终端模式清理序列 | `src/utils/gracefulShutdown.ts:59` — `cleanupTerminalModes()` | 排查退出后终端乱码问题时 |
+| 清理函数注册表 | `src/utils/cleanupRegistry.ts` — `registerCleanup()` | 给新模块添加退出清理逻辑时 |
+| AbortController 父子级联 | `src/utils/abortController.ts` — `createChildAbortController()` | 实现可取消的长时间操作时 |
+| AbortError 统一检测 | `src/utils/errors.ts` — `isAbortError()` | catch 块里区分取消和真实错误时 |
+| React 错误边界 | `src/components/SentryErrorBoundary.ts` | 了解 TUI 组件崩溃防护时 |
