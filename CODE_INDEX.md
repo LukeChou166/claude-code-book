@@ -189,6 +189,26 @@
 
 ---
 
+## 5层安全体系（第15章）
+
+| 功能 | 文件路径 | 何时查看 |
+|------|----------|---------|
+| Layer 1 核心安全提示 | `src/constants/prompts.ts` — `getActionsSection()` | 理解 AI 的行为约束时 |
+| Layer 1 Auto Mode 安全约束 | `src/utils/messages.ts` — `getAutoModeFullInstructions()` | 排查自动模式是否会泄露信息时 |
+| Layer 2 权限上下文（不可变） | `src/types/permissions.ts:427` — `ToolPermissionContext` | 理解权限不可变设计时 |
+| Layer 2 Bash 命令 AST 安全分析 | `src/utils/bash/ast.ts` | 排查为何某条 bash 命令被拦截时 |
+| Layer 2 文件系统边界检查 | `src/utils/permissions/filesystem.ts` | 排查路径越界访问时 |
+| Layer 3 沙箱适配层 | `src/utils/sandbox/sandbox-adapter.ts` | 了解沙箱与 Claude CLI 集成时 |
+| Layer 3 沙箱配置转换 | `src/utils/sandbox/sandbox-adapter.ts` — `convertToSandboxRuntimeConfig()` | 自定义文件系统/网络约束时 |
+| Layer 3 防 Git 沙箱逃逸 | `src/utils/sandbox/sandbox-adapter.ts:257` | 理解 bareGitRepo 攻击向量防护时 |
+| Layer 4 进入/退出计划模式 | `src/tools/EnterPlanModeTool/`, `src/tools/ExitPlanModeTool/` | 理解 Plan Mode 工具实现时 |
+| Layer 4 Plan Mode 强制提示词 | `src/utils/messages.ts` — `getPlanModeV2Instructions()` | 了解 Plan Mode 如何约束 AI 行为时 |
+| Layer 5 Hooks 执行引擎 | `src/utils/hooks.ts` — `executePreToolUseHooks()` | 排查 Hook 脚本不触发时 |
+| Layer 5 成本上限检查 | `src/QueryEngine.ts:972` | 排查会话为何突然终止时 |
+| Layer 5 Token 预算解析 | `src/utils/tokenBudget.ts` — `parseTokenBudget()` | 了解 token 预算语法时 |
+
+---
+
 ## 错误处理与恢复（第14章）
 
 | 功能 | 文件路径 | 何时查看 |

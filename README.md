@@ -23,6 +23,7 @@
 | [第11章](./11-session-persistence.md) | 会话持久化与恢复 | `utils/sessionStorage.ts`, `QueryEngine.ts` |
 | [第13章](./13-state-management.md) | 状态管理：极简自研 Store | `state/store.ts`, `state/AppStateStore.ts`, `state/AppState.tsx` |
 | [第14章](./14-error-recovery.md) | 错误处理与恢复机制 | `services/api/withRetry.ts`, `utils/gracefulShutdown.ts`, `utils/abortController.ts` |
+| [第15章](./15-security-layers.md) | 5层安全体系：纵深防御 | `constants/prompts.ts`, `types/permissions.ts`, `utils/sandbox/`, `tools/EnterPlanModeTool/`, `utils/hooks.ts` |
 
 ---
 
