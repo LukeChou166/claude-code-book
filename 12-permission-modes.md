@@ -249,6 +249,227 @@ AI 可以在计划批准后立即拆分任务，派生多个子 Agent 并行执�
 
 ---
 
+### 12.3.8 Plan Mode 的三道防线：如何保证模型不乱执行
+
+Plan Mode 的核心约束是"只能读不能写"。但大模型不是强规则型的——它可能"不小心"调用了 `FileEditTool`。系统用**三道独立的防线**确保模型无法在用户不知情的情况下写入文件，每道防线都无法被模型绕过。
+
+#### 防线一：Prompt 层的强制指令（最表层）
+
+模型进入 Plan Mode 后，`EnterPlanModeTool.mapToolResultToToolResultBlockParam()` 会把指令作为 tool_result 直接打回给模型：
+
+```typescript
+// src/tools/EnterPlanModeTool/EnterPlanModeTool.ts 第 103-118 行
+// 进入 plan mode 后，tool_result 里的内容：
+`Entered plan mode. You should now focus on exploring the codebase...
+
+Remember: DO NOT write or edit any files yet. This is a read-only exploration and planning phase.`
+```
+
+同时，每轮对话系统都会通过 `getPlanModeV2Instructions()` 重复注入一段强制提示（`messages.ts` 第 3227 行）：
+
+> **"Plan mode is active... you MUST NOT make any edits... This supercedes any other instructions you have received."**
+
+关键字是 **"supercedes any other instructions"**——防止用户消息里夹杂"顺便改一下这个文件"之类的 prompt injection。
+
+**但这层防线依赖模型合作**，如果模型"不听话"仍调用写操作工具，就到了第二道防线。
+
+#### 防线二：权限系统层的硬拦截（核心防线）
+
+当 mode = `'plan'` 时，`checkWritePermissionForTool()`（`filesystem.ts`）**有意跳过了 plan mode 的自动允许逻辑**：
+
+```typescript
+// src/utils/permissions/filesystem.ts 第 1360-1375 行
+// 3. If in acceptEdits mode, allow all writes in cwd
+if (toolPermissionContext.mode === 'acceptEdits' && isInWorkingDir) {
+  return { behavior: 'allow', ... }
+}
+// ↑ 只检查 acceptEdits，故意不检查 plan
+// → plan mode 下写操作走到最后一步，必然返回 'ask'
+
+// 5. Default to asking for permission
+return {
+  behavior: 'ask',   // ← 弹出用户确认框，不自动执行
+  message: `Claude requested permissions to write to ${path}...`,
+}
+```
+
+完整调用链：
+
+```
+FileEditTool.call()
+    ↓
+checkPermissions()（工具权限检查）
+    ↓
+checkWritePermissionForTool()
+    ↓
+mode === 'plan' → 跳过自动允许逻辑
+    ↓
+behavior: 'ask' → 弹出"是否允许写操作？"对话框
+    ↓
+用户点"否" → 工具被拒绝，代码不会被写入
+```
+
+**即使模型调用了 `FileEditTool`，系统在执行前会弹出确认框。用户拒绝即可，代码不会被写入。** 这道防线不依赖模型自觉，是硬编码的权限拦截。
+
+#### 防线三：ExitPlanMode 必须用户手动确认（出口锁）
+
+`ExitPlanModeV2Tool` 的 `checkPermissions()` 返回 `behavior: 'ask'`（第 233-238 行），意味着**必须用户手动点击批准，才能退出 Plan Mode 进入执行阶段**：
+
+```typescript
+// src/tools/ExitPlanModeTool/ExitPlanModeV2Tool.ts 第 233-238 行
+// For non-teammates, require user confirmation to exit plan mode
+return {
+  behavior: 'ask' as const,
+  message: 'Exit plan mode?',
+  updatedInput: input,
+}
+```
+
+只有批准后，系统才把计划文本打包成执行令，通过 `initialMessage` 机制启动全新执行会话（`ExitPlanModePermissionRequest.tsx` 第 374-387 行）：
+
+```typescript
+setAppState(prev => ({
+  ...prev,
+  initialMessage: {
+    message: createUserMessage({
+      content: `Implement the following plan:\n\n${currentPlan}...`
+    }),
+    clearContext: true,  // ← 清空对话上下文，开启全新执行会话
+    mode,
+    allowedPrompts
+  }
+}))
+```
+
+**没有这条消息，模型永远停留在 Plan Mode，无法自行切换到执行阶段。**
+
+#### 唯一例外：plan file 本身可以写
+
+`checkEditableInternalPath()`（`filesystem.ts` 第 1479 行）允许写入计划文件：
+
+```typescript
+// Plan files for current session — 仅此一个例外
+if (isSessionPlanFile(normalizedPath)) {
+  return {
+    behavior: 'allow',
+    decisionReason: { type: 'other', reason: 'Plan files for current session are allowed for writing' },
+  }
+}
+```
+
+#### 三道防线总结
+
+```
+EnterPlanMode 触发
+        ↓
+┌─────────────────────────────────────────────────────────┐
+│ 防线 1（Prompt 层）                                      │
+│ tool_result 里注入 "DO NOT write files" 指令            │
+│ 每个 turn 重复注入（supercedes any other instructions） │
+│ → 告诉模型不要写文件（依赖模型合作）                    │
+└─────────────────────────────────────────────────────────┘
+        ↓  如果模型仍调用 FileEditTool
+┌─────────────────────────────────────────────────────────┐
+│ 防线 2（权限系统层）                                     │
+│ checkWritePermissionForTool() 跳过 plan mode 的自动允许 │
+│ 返回 behavior: 'ask' → 弹出用户确认框                   │
+│ → 用户点"否"即可阻止，代码不会被写入                    │
+└─────────────────────────────────────────────────────────┘
+        ↓  如果模型想"溜出" plan mode 去执行
+┌─────────────────────────────────────────────────────────┐
+│ 防线 3（出口锁）                                         │
+│ ExitPlanMode 的 checkPermissions 返回 'ask'              │
+│ 必须用户手动批准计划，才能切换回执行模式                 │
+│ 只有批准后，系统才发送 "Implement the plan" 执行令       │
+└─────────────────────────────────────────────────────────┘
+```
+
+---
+
+### 12.3.9 执行阶段的步骤保证：软约束而非强执行
+
+#### 计划批准后，模型不一定按步骤执行
+
+用户批准计划退出 Plan Mode 后，系统**没有任何代码能强制模型必须按 1→2→3 步骤顺序执行**。模型可能跳步骤、合并步骤、或换顺序。
+
+模型收到的执行令是（`ExitPlanModeV2Tool.ts` 第 481-490 行）：
+
+```
+User has approved your plan. You can now start coding. Start with updating your todo list if applicable
+
+Your plan has been saved to: ${filePath}
+You can refer back to it if needed during implementation.
+
+## Approved Plan:
+${plan}
+```
+
+计划全文被注入为执行令的一部分——相当于给模型一份"地图"，但**没有导航系统强制按路线走**。
+
+#### 四层软性约束
+
+系统用四个层面降低乱执行的概率：
+
+| 层面 | 机制 | 关键代码位置 |
+|------|------|-------------|
+| **计划全文注入** | 把完整计划原文发回模型作为执行令 | `ExitPlanModeV2Tool.ts` 第 488 行 |
+| **TodoWrite 软性建议** | 执行令含 "Start with updating your todo list **if applicable**" | 非强制 |
+| **文件持久化** | 计划写入磁盘，模型可随时用 FileReadTool 回读 | "Your plan has been saved to: ${filePath}" |
+| **兜底提醒** | 连续 N 个 turn 没调 TodoWrite，系统自动插入 `todo_reminder` attachment | `attachments.ts` 第 3296-3312 行 |
+
+#### TodoWrite 不一定被执行
+
+执行令里的关键词是 **`if applicable`**——这是软性建议，不是强制指令：
+
+```typescript
+// src/tools/ExitPlanModeTool/ExitPlanModeV2Tool.ts 第 483 行
+content: `User has approved your plan. You can now start coding. Start with updating your todo list if applicable`
+```
+
+模型可以直接调 `FileEditTool` 开始写代码，完全跳过 TodoWrite，系统不会阻止。
+
+**更深的问题**：即使模型想维护 todos，`clearContext: true` 会导致 todos 隐性丢失。
+
+默认批准路径触发 `clearContext: true`，调用 `clearConversation()`，该函数执行 `regenerateSessionId()`（`conversation.ts` 第 203 行）生成全新 session ID。
+
+todos 的存储 key 是 `sessionId`（`TodoWriteTool.ts` 第 67 行）：
+
+```typescript
+// src/tools/TodoWriteTool/TodoWriteTool.ts 第 65-67 行
+async call({ todos }, context) {
+  const appState = context.getAppState()
+  const todoKey = context.agentId ?? getSessionId()  // ← key = 当前 sessionId
+```
+
+`clearConversation` 的 `setAppState` 返回值（第 168-190 行）没有显式重置 `todos: {}`——todos 数据还在 `AppState.todos[旧sessionId]` 里。但新会话用新 sessionId 查询，拿到的是空数组。**对执行阶段的模型来说，todos 等于被清空了**，必须从头重建。
+
+#### 为什么是软约束而不是硬保证
+
+这是大模型应用的根本限制：Plan Mode 里的"步骤"是给模型看的**文本**，不是像操作系统调度器那样的**强制执行序列**。系统能做的是通过 prompt 工程和 TodoWrite 工具把乱执行的概率降低，但无法提供 ACID 事务般的"步骤完整性保证"。
+
+Anthropic 内部正在开发 `VerifyPlanExecution` 工具（`tools.ts` 第 91-95 行），在计划执行完成后验证计划覆盖度：
+
+```typescript
+// src/tools.ts 第 91-95 行
+const VerifyPlanExecutionTool =
+  process.env.CLAUDE_CODE_VERIFY_PLAN === 'true'
+    ? require('./tools/VerifyPlanExecutionTool/VerifyPlanExecutionTool.js').VerifyPlanExecutionTool
+    : null
+```
+
+外部版本 `CLAUDE_CODE_VERIFY_PLAN` 通过死代码消除被移除，说明这是正在开发中的功能——Anthropic 也意识到了这个缺口。
+
+#### 本节小结
+
+| 问题 | 答案 |
+|------|------|
+| Plan Mode 下模型能偷偷写文件吗？ | **不能**，权限系统在执行前弹出确认框 |
+| 用户批准后模型一定按步骤执行吗？ | **不一定**，系统只有软约束（文本建议 + 兜底提醒） |
+| 批准后一定会调 TodoWrite 吗？ | **不一定**，`if applicable` 是软性建议；且 clearContext 导致旧 todos 对新会话不可见 |
+| Anthropic 知道执行验证的缺口吗？ | **知道**，`VerifyPlanExecution` 工具正在开发中，外部版本尚未开放 |
+
+---
+
 ## 12.4 模式1：Default Mode（默认模式）
 
 ### 12.4.1 核心行为
