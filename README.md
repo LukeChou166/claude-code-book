@@ -16,7 +16,7 @@
 | [第4章](./04-agentic-loop.md) | Agentic Loop 智能体核心循环 | `query.ts`, `services/tools/toolOrchestration.ts` |
 | [第5章](./05-tool-system.md) | 工具系统：让 AI 拥有手 | `Tool.ts`, `tools.ts`, `tools/GrepTool/` |
 | [第6章](./06-permissions.md) | 权限系统：安全边界 | `types/permissions.ts`, `hooks/` |
-| [第7章](./07-multi-agent.md) | 多智能体系统 | `tools/AgentTool/`, `tasks/` |
+| [第7章](./07-task-orchestration.md) | 任务编排 | `tools/AgentTool/`, `tasks/` |
 | [第8章](./08-context-management.md) | 上下文管理与自动压缩 | `services/compact/`, `utils/tokens.ts` |
 | [第9章](./09-memory-system.md) | 记忆系统：让 AI 跨会话学习 | `memdir/`, `services/SessionMemory/` |
 | [第10章](./10-mcp-integration.md) | MCP 协议集成 | `services/mcp/` |
