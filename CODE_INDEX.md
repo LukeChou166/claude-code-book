@@ -44,6 +44,19 @@
 | FileEditTool | `src/tools/FileEditTool/FileEditTool.ts` | 精确文件编辑 |
 | FileReadTool | `src/tools/FileReadTool/FileReadTool.ts` | 文件内容读取 |
 | AgentTool | `src/tools/AgentTool/AgentTool.ts` | 启动子 Agent |
+| TodoWriteTool | `src/tools/TodoWriteTool/TodoWriteTool.ts` | V1 会话任务清单（全量替换） |
+| ToolSearchTool | `src/tools/ToolSearchTool/ToolSearchTool.ts` | 延迟工具 schema 加载器 |
+| SkillTool | `src/tools/SkillTool/SkillTool.ts` | slash-command 技能执行器（inline/fork 双模式）|
+| TaskCreateTool | `src/tools/TaskCreateTool/TaskCreateTool.ts` | V2 创建持久化任务 |
+| TaskGetTool | `src/tools/TaskGetTool/TaskGetTool.ts` | V2 按 ID 获取任务详情 |
+| TaskListTool | `src/tools/TaskListTool/TaskListTool.ts` | V2 列出全部任务（过滤已解决依赖）|
+| TaskUpdateTool | `src/tools/TaskUpdateTool/TaskUpdateTool.ts` | V2 更新任务状态/属性/依赖 |
+| TaskStopTool | `src/tools/TaskStopTool/TaskStopTool.ts` | 停止后台运行的进程任务 |
+| TeamCreateTool | `src/tools/TeamCreateTool/TeamCreateTool.ts` | 创建多 Agent 协作团队 |
+| TeamDeleteTool | `src/tools/TeamDeleteTool/TeamDeleteTool.ts` | 解散团队并清理磁盘资源 |
+| 延迟工具判定 | `src/tools/ToolSearchTool/prompt.ts` — `isDeferredTool()` | 判断某个工具是否需要延迟加载 |
+| 团队辅助函数 | `src/utils/swarm/teamHelpers.ts` | team config 读写、目录清理 |
+| 任务工具函数 | `src/utils/tasks.ts` | Task 的 CRUD、blockedBy 管理 |
 
 ---
 
