@@ -264,7 +264,7 @@ async call({ pattern, path, glob, output_mode, head_limit, ... }, { abortControl
 
 **按修改时间排序**：用户最关注的通常是最近修改的文件，这个优化让 AI 更快找到相关文件。
 
-**路径转相对路径**：把 `/Users/zhoulimac/project/src/utils.ts` 转成 `src/utils.ts`，节省上下文 token。
+**路径转相对路径**：把 `/Users/luke/project/src/utils.ts` 转成 `src/utils.ts`，节省上下文 token。
 
 **默认结果数量限制**：`head_limit` 默认 250，防止大型代码库的广泛搜索填满上下文窗口（250 行约 2,500 token）。
 
@@ -315,8 +315,8 @@ export function checkReadPermissionForTool(tool, input, toolPermissionContext) {
 直接跑 `rg` 返回的是原始文本，模型要自己处理：
 
 ```
-/Users/zhoulimac/project/src/utils/auth.ts:42:  const token = getToken()
-/Users/zhoulimac/project/src/utils/crypto.ts:18:  return hash(password)
+/Users/luke/project/src/utils/auth.ts:42:  const token = getToken()
+/Users/luke/project/src/utils/crypto.ts:18:  return hash(password)
 ...（可能 5000 行）
 ```
 
