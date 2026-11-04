@@ -10,8 +10,13 @@ jobs:
     steps:
       - name: Trigger blog sync workflow
         run: |
-          curl -sf -X POST \
+          CODE=$(curl -s -o /tmp/resp.txt -w '%{http_code}' \
+            -X POST \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer ${{ secrets.BLOG_PAT }}" \
             https://api.github.com/repos/LukeChou166/LukeChou166.github.io/dispatches \
-            -d '{"event_type":"book-update"}'
+            -d '{"event_type":"book-update"}')
+          echo "dispatch HTTP status: $CODE"
+          echo "  204 = 成功; 401 = token 无效或过期; 403 = 无 dispatch 权限; 404 = token 未授权该仓库"
+          cat /tmp/resp.txt | head -3
+          test "$CODE" = "204"
