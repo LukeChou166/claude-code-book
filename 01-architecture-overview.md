@@ -147,31 +147,6 @@ sequenceDiagram
 
 ---
 
-## 1.5 技术选型解读
-
-### TypeScript + Bun
-
-Claude Code 用 [Bun](https://bun.sh/) 作为运行时和打包器，而不是传统的 Node.js + webpack/esbuild。
-
-代码里充斥着这样的写法：
-
-```typescript
-// src/query.ts（第 15-20 行）
-const reactiveCompact = feature('REACTIVE_COMPACT')
-  ? (require('./services/compact/reactiveCompact.js') as typeof import('./services/compact/reactiveCompact.js'))
-  : null
-const contextCollapse = feature('CONTEXT_COLLAPSE')
-  ? (require('./services/contextCollapse/index.js') as typeof import('./services/contextCollapse/index.js'))
-  : null
-```
-
-`feature('FLAG')` 是 Bun 的 **Dead-Code Elimination (DCE)** 特性：在编译时，如果 `FLAG` 为 `false`，整个三元表达式的 false 分支会被从打包产物中删除，就像 C 语言的 `#ifdef`。
-
-这让 Anthropic 可以：
-- 在同一份代码库里维护外部版和内部版（`ant` 用户）功能
-- 通过构建标志选择性开启实验特性，不增加生产包体积
-- 避免 feature flag 检查在运行时的开销
-
 ### 异步生成器（AsyncGenerator）作为流式管道
 
 `query.ts` 里核心的 `query()` 函数签名：
