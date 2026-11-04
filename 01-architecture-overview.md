@@ -104,6 +104,47 @@ Claude Code 的目标是构建一个**真正的编程智能体（Coding Agent）
 5. 流式输出到终端 / SDK
 ```
 
+以上是高层信息流。更精确的**对象间时序图**如下（覆盖用户、Agent 循环、记忆、上下文管理、Agent 状态、权限系统、工具系统、LLM 八个对象）：
+
+```mermaid
+sequenceDiagram
+    participant 用户
+    participant 循环 as Agent循环
+    participant 记忆
+    participant 上下文 as 上下文管理
+    participant 状态 as Agent状态
+    participant 权限 as 权限系统
+    participant 工具 as 工具系统
+    participant LLM
+
+    用户->>循环: 输入文本
+    循环->>记忆: 加载 CLAUDE.md
+    记忆-->>循环: 记忆内容
+    循环->>上下文: 构建 systemPrompt
+    循环->>状态: 更新会话状态
+
+    loop 直到 LLM 回复纯文本
+        循环->>LLM: 发送消息(含上下文)
+        LLM-->>循环: 回复(text / tool_use)
+
+        alt 含 tool_use
+            循环->>权限: 检查权限
+            opt 需确认
+                权限->>用户: 请求批准
+                用户-->>权限: 批准
+            end
+            权限-->>循环: 允许
+            循环->>工具: 执行工具
+            工具-->>循环: tool_result
+            循环->>上下文: 追加 tool_result
+        end
+    end
+
+    循环->>用户: 流式输出最终内容
+```
+
+**核心结论**：LLM 只负责「想」，工具只负责「做」，权限卡在「做」之前，Agent 循环是来回传话的中间人。
+
 ---
 
 ## 1.5 技术选型解读
@@ -130,48 +171,6 @@ const contextCollapse = feature('CONTEXT_COLLAPSE')
 - 在同一份代码库里维护外部版和内部版（`ant` 用户）功能
 - 通过构建标志选择性开启实验特性，不增加生产包体积
 - 避免 feature flag 检查在运行时的开销
-
-### React (ink) 驱动终端 UI
-
-React 不只用于浏览器。[ink](https://github.com/vadimdemedes/ink) 库把 React 组件渲染到命令行终端。这意味着：
-- 终端里的进度条、工具调用展示、权限确认弹窗都是 React 组件
-- 有完整的状态管理（`useState`, `useEffect`）和生命周期
-- UI 更新是响应式的：当工具执行状态变化，对应的 React 组件自动重渲染
-
-**与浏览器 React 的对比：**
-
-| 维度 | 浏览器 React | Claude Code ink/React |
-|------|-------------|----------------------|
-| 渲染目标 | DOM（HTML 元素） | 终端（ANSI 字符） |
-| 布局引擎 | CSS Flexbox（浏览器内置） | **Yoga**（Facebook 独立 Flexbox 实现） |
-| 基础组件 | `<div>`、`<span>` | `<Box>`（≈div）、`<Text>`（≈span） |
-| 事件 | 鼠标/键盘（原生 DOM） | 键盘/鼠标（解析 ANSI 转义序列） |
-| 输出 | 像素 | ANSI 转义码字符串 |
-
-**渲染原理（四步流水线）：**
-
-1. **自定义 React Reconciler**（`src/ink/reconciler.ts`）：调用 `react-reconciler` 创建自定义渲染器，替换掉 `react-dom`。React 的 diff/更新算法完全复用，只是最终"操作 DOM"变成了"操作 ink 的虚拟节点"。
-
-2. **虚拟节点类型**（`src/ink/dom.ts`）：ink 有自己的"HTML 标签"——`ink-box`（对应 `<Box>`）、`ink-text`（对应 `<Text>`）等，存在于内存的虚拟节点树里。
-
-3. **Yoga 布局引擎**（`src/ink/layout/yoga.ts`）：每个 `<Box>` 节点对应一个 Yoga 节点（Meta 开源的独立 C++ Flexbox 实现，通过 native-ts 绑定调用）。Yoga 计算出每个组件的位置和尺寸，单位是"字符格"。
-
-4. **差量渲染到屏幕**（`src/ink/render-node-to-output.ts`）：渲染器把虚拟节点树遍历一遍，生成字符格矩阵（Screen），然后与上一帧 diff，只把变化的部分写入 stdout（ANSI 转义码控制光标位置和颜色）。稳定帧只更新变化的字符格 O(changed cells)，布局变动帧才全量重绘 O(rows×cols)。
-
-**整体数据流：**
-```
-React 组件（<Box>, <Text>）
-      ↓  React Reconciler（自定义渲染器）
-  ink 虚拟 DOM（ink-box, ink-text 节点）
-      ↓  Yoga 布局引擎
-  每个节点的 (x, y, width, height) 字符坐标
-      ↓  render-node-to-output.ts
-  字符格矩阵 Screen（每格存字符+颜色+样式）
-      ↓  writeDiffToTerminal()（差量 diff）
-  ANSI 转义码 → stdout → 终端屏幕
-```
-
-Claude Code 完全自研了这套终端渲染引擎（`src/ink/` 目录，约 50 个文件），实现了 Flexbox 布局、鼠标事件、键盘导航、差量渲染、滚动、选中、搜索高亮、主题系统等完整特性。
 
 ### 异步生成器（AsyncGenerator）作为流式管道
 
