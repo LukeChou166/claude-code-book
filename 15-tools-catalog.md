@@ -1,4 +1,4 @@
-# 第 16 章：工具目录详解——TodoWrite、ToolSearch、Skill 与 Task/Team 系列
+# 第15章 工具目录详解——TodoWrite、ToolSearch、Skill 与 Task/Team 系列
 
 > **前置知识**：第 5 章（工具系统基础）、第 7 章（任务编排）  
 > **本章目标**：逐一剖析 10 个"元级"工具的定位、触发时机、内部实现和设计哲学
@@ -28,9 +28,9 @@
 
 ---
 
-## 16.1 TodoWriteTool — 会话任务清单（V1）
+## 15.1 TodoWriteTool — 会话任务清单（V1）
 
-### 16.1.1 解决什么问题
+### 15.1.1 解决什么问题
 
 AI 执行多步骤任务时，**用户看不到当前进度**，AI 自己也容易丢失上下文（遗漏步骤）。`TodoWriteTool` 给会话附加一个"白板"——AI 把计划写上去，用户随时看到进度条。
 
@@ -39,7 +39,7 @@ AI 执行多步骤任务时，**用户看不到当前进度**，AI 自己也容�
 app_state.todos[session_id] = new_todos;  // 全量替换
 ```
 
-### 16.1.2 何时触发
+### 15.1.2 何时触发
 
 提示词（`prompt.ts`）规定了以下场景**必须**使用：
 
@@ -52,7 +52,7 @@ app_state.todos[session_id] = new_todos;  // 全量替换
 
 **不应使用**：单步骤简单任务、纯会话/信息查询。
 
-### 16.1.3 核心实现
+### 15.1.3 核心实现
 
 ```
 src/tools/TodoWriteTool/TodoWriteTool.ts
@@ -105,7 +105,7 @@ Before writing your final summary, spawn the verification agent...
 
 这是一个**提示注入机制**——通过工具返回结果内嵌指令，引导 AI 补做验证，而不是依赖系统 prompt。
 
-### 16.1.4 启用条件
+### 15.1.4 启用条件
 
 ```typescript
 isEnabled() {
@@ -113,7 +113,7 @@ isEnabled() {
 }
 ```
 
-### 16.1.5 C++ 语法对照
+### 15.1.5 C++ 语法对照
 
 | TypeScript 写法 | C++ 等价 |
 |----------------|---------|
@@ -123,9 +123,9 @@ isEnabled() {
 
 ---
 
-## 16.2 ToolSearchTool — 延迟工具的 Schema 加载器
+## 15.2 ToolSearchTool — 延迟工具的 Schema 加载器
 
-### 16.2.1 解决什么问题
+### 15.2.1 解决什么问题
 
 Claude Code 有几十个工具，如果一次性全部注入 System Prompt，会消耗大量 token（每个工具的参数 schema 少则几百字，多则几千字）。
 
@@ -141,7 +141,7 @@ ToolSearchTool 返回：
   [完整 JSONSchema]  ← 等于把 .so 中的符号表加载进来
 ```
 
-### 16.2.2 何时触发
+### 15.2.2 何时触发
 
 AI 想调用某个工具，但只知道它的名字（不知道参数格式）时，必须先调用 `ToolSearchTool` 获取 schema，然后才能构造调用。
 
@@ -149,7 +149,7 @@ AI 想调用某个工具，但只知道它的名字（不知道参数格式）�
 1. **精确选择**：`select:Read,Edit,Grep`——一次加载多个指定工具
 2. **关键词搜索**：`notebook jupyter`——按功能描述模糊匹配
 
-### 16.2.3 核心实现
+### 15.2.3 核心实现
 
 ```
 src/tools/ToolSearchTool/ToolSearchTool.ts
@@ -226,7 +226,7 @@ mapToolResultToToolResultBlockParam(content, toolUseID) {
 
 返回 `tool_reference` 而非普通 text——Anthropic API 会把这个特殊类型解析为"展开该工具的完整 schema 插入上下文"。这是协议层特性，不是 Claude Code 自己拼接的。
 
-### 16.2.4 为何是"只读"工具
+### 15.2.4 为何是"只读"工具
 
 ```typescript
 isReadOnly() { return true }
@@ -237,9 +237,9 @@ isConcurrencySafe() { return true }
 
 ---
 
-## 16.3 SkillTool — Slash Command 技能执行器
+## 15.3 SkillTool — Slash Command 技能执行器
 
-### 16.3.1 解决什么问题
+### 15.3.1 解决什么问题
 
 用户可以在 `.claude/` 目录下写 Markdown 格式的 "Skill"（技能），作为快捷指令（如 `/commit`、`/review-pr`）。这些技能本质是"注入一段上下文 + 指令"的快捷方式。
 
@@ -247,20 +247,20 @@ isConcurrencySafe() { return true }
 
 **C++ 类比**：就像 C++ 里的 `std::bind` 或函数适配器——把一组已有的操作封装成一个可以被调用的对象，调用时展开执行。
 
-### 16.3.2 两种执行模式
+### 15.3.2 两种执行模式
 
 | 模式 | 触发条件 | 行为 |
 |------|---------|------|
 | **inline（内联）** | 普通 Skill（默认） | 把 Skill 的 prompt 注入为新的 user message，AI 继续在同一对话中处理 |
 | **fork（分叉）** | `context: fork` 属性 | 启动独立子 Agent 执行 Skill，子 Agent 完成后返回结果摘要 |
 
-### 16.3.3 何时触发
+### 15.3.3 何时触发
 
 - 任务场景明确匹配某个已知 Skill 的能力
 - 用户描述的需求与某个 Skill 的描述高度吻合
 - AI 收到类似 `use the pdf skill` 的暗示
 
-### 16.3.4 核心实现
+### 15.3.4 核心实现
 
 ```
 src/tools/SkillTool/SkillTool.ts
@@ -358,11 +358,11 @@ contextModifier(ctx) {
 
 ---
 
-## 16.4 Task 系列（V2）— 持久化任务管理
+## 15.4 Task 系列（V2）— 持久化任务管理
 
 Task V2 是 TodoWriteTool 的升级版，将任务**持久化到磁盘**（`~/.claude/tasks/`），支持多 Agent 共享、任务依赖（blocks/blockedBy）、任务所有者（owner）。
 
-### 16.4.1 系统概述
+### 15.4.1 系统概述
 
 ```
 ~/.claude/tasks/{task-list-id}/
@@ -380,7 +380,7 @@ pending → in_progress → completed
               deleted（随时可删）
 ```
 
-### 16.4.2 TaskCreateTool — 创建任务
+### 15.4.2 TaskCreateTool — 创建任务
 
 ```
 src/tools/TaskCreateTool/TaskCreateTool.ts
@@ -425,7 +425,7 @@ src/tools/TaskCreateTool/TaskCreateTool.ts
 
 ---
 
-### 16.4.3 TaskGetTool — 按 ID 获取任务
+### 15.4.3 TaskGetTool — 按 ID 获取任务
 
 ```
 src/tools/TaskGetTool/TaskGetTool.ts
@@ -461,7 +461,7 @@ src/tools/TaskGetTool/TaskGetTool.ts
 
 ---
 
-### 16.4.4 TaskListTool — 列出全部任务
+### 15.4.4 TaskListTool — 列出全部任务
 
 ```
 src/tools/TaskListTool/TaskListTool.ts
@@ -519,7 +519,7 @@ const allTasks = (await listTasks(taskListId)).filter(
 
 ---
 
-### 16.4.5 TaskUpdateTool — 更新任务状态
+### 15.4.5 TaskUpdateTool — 更新任务状态
 
 ```
 src/tools/TaskUpdateTool/TaskUpdateTool.ts
@@ -583,7 +583,7 @@ if (updates.owner && isAgentSwarmsEnabled()) {
 
 ---
 
-### 16.4.6 TaskStopTool — 停止后台任务进程
+### 15.4.6 TaskStopTool — 停止后台任务进程
 
 ```
 src/tools/TaskStopTool/TaskStopTool.ts
@@ -626,9 +626,9 @@ aliases: ['KillShell']  // 保留旧名字，老的 transcript 重放时不会�
 
 ---
 
-## 16.5 Team 系列 — 多 Agent 协作团队
+## 15.5 Team 系列 — 多 Agent 协作团队
 
-### 16.5.1 系统概述
+### 15.5.1 系统概述
 
 Team 系列支持"一个 Leader + N 个 Teammate"的协作模型：
 
@@ -649,7 +649,7 @@ Leader（主 Agent）
 ~/.claude/tasks/{team-name}/              ← 共享任务列表
 ```
 
-### 16.5.2 TeamCreateTool — 创建团队
+### 15.5.2 TeamCreateTool — 创建团队
 
 ```
 src/tools/TeamCreateTool/TeamCreateTool.ts
@@ -703,7 +703,7 @@ Leader 不是普通 Teammate，不应触发 `isTeammate()=true`（否则会开�
 
 ---
 
-### 16.5.3 TeamDeleteTool — 解散团队
+### 15.5.3 TeamDeleteTool — 解散团队
 
 ```
 src/tools/TeamDeleteTool/TeamDeleteTool.ts
@@ -752,7 +752,7 @@ if (activeMembers.length > 0) {
 
 ---
 
-## 16.6 综合对比：V1 vs V2 任务系统
+## 15.6 综合对比：V1 vs V2 任务系统
 
 | 维度 | `TodoWriteTool`（V1） | Task 系列（V2） |
 |------|--------------------|----------------|
@@ -767,7 +767,7 @@ if (activeMembers.length > 0) {
 
 ---
 
-## 16.7 调用时序总结
+## 15.7 调用时序总结
 
 ### 单 Agent 场景（V1）
 
@@ -835,7 +835,7 @@ AI 想调用 BashTool（首次）：
 
 ---
 
-## 16.8 设计哲学提炼
+## 15.8 设计哲学提炼
 
 **1. "工具即接口，不是实现"**  
 Task/Team 工具只是接口层，底层是 `utils/tasks.ts`、`utils/swarm/teamHelpers.ts` 等模块。工具负责验证、权限、UI；实际逻辑在 utils 层。

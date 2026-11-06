@@ -1,6 +1,6 @@
 # 第9章 MCP 协议集成：开放的工具生态
 
-> **前置知识**：第5章工具系统、第2章启动流程  
+> **前置知识**：第4章 工具系统、第1章 整体架构与启动  
 > **关键文件**：`src/services/mcp/client.ts`（约3400行）、`src/services/mcp/MCPConnectionManager.tsx`、`src/tools/MCPTool/MCPTool.ts`
 
 ---

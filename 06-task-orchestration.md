@@ -1,11 +1,11 @@
-# 第7章 任务编排（Task Orchestration）
+# 第6章 任务编排（Task Orchestration）
 
-> **前置知识**：第4章 Agentic Loop、第5章工具系统  
+> **前置知识**：第3章 Agentic Loop、第4章工具系统  
 > **关键文件**：`src/tools/AgentTool/`、`src/tasks/`、`src/tools/AgentTool/built-in/`
 
 ---
 
-## 7.1 解决什么问题
+## 6.1 解决什么问题
 
 单个 AI 面对复杂任务有两个根本瓶颈：
 
@@ -24,7 +24,7 @@ Claude Code 的编排模型围绕三个关键抽象构建：
 
 ---
 
-## 7.2 编排层次：从单次工具调用到 Swarm
+## 6.2 编排层次：从单次工具调用到 Swarm
 
 Claude Code 的任务编排有四个层次，从简单到复杂：
 
@@ -48,7 +48,7 @@ Claude Code 的任务编排有四个层次，从简单到复杂：
 
 ---
 
-## 7.3 核心设计：AgentTool——工具即编排
+## 6.3 核心设计：AgentTool——工具即编排
 
 ### 为什么不用专门的编排协议？
 
@@ -94,7 +94,7 @@ AgentTool({
 
 ---
 
-## 7.4 Task 抽象：描述执行环境
+## 6.4 Task 抽象：描述执行环境
 
 `tasks/` 目录定义了四种任务类型，覆盖不同的执行场景：
 
@@ -137,7 +137,7 @@ export class LocalAgentTask {
 
 ---
 
-## 7.5 上下文隔离机制
+## 6.5 上下文隔离机制
 
 子 Agent 的上下文隔离通过 `ToolUseContext` 实现：
 
@@ -171,11 +171,11 @@ const subagentContext: ToolUseContext = {
 
 ---
 
-## 7.6 内置专业化 Agent
+## 6.6 内置专业化 Agent
 
 `tools/AgentTool/built-in/` 目录下预定义了三个 Agent，每个针对不同的编排场景：
 
-### 7.6.1 Explore Agent：只读代码探索
+### 6.6.1 Explore Agent：只读代码探索
 
 ```typescript
 // src/tools/AgentTool/built-in/exploreAgent.ts
@@ -201,7 +201,7 @@ export const EXPLORE_AGENT: BuiltInAgentDefinition = {
 - `omitClaudeMd: true`：省去 CLAUDE.md 里的编码规范，节省 token，也避免规范对只读任务产生误导
 - `disallowedTools` 包含 `AGENT_TOOL_NAME`：防止 Explore Agent 再启动子 Agent，避免指数级嵌套
 
-### 7.6.2 General Purpose Agent：通用执行者
+### 6.6.2 General Purpose Agent：通用执行者
 
 ```typescript
 // src/tools/AgentTool/built-in/generalPurposeAgent.ts
@@ -216,7 +216,7 @@ export const GENERAL_PURPOSE_AGENT: BuiltInAgentDefinition = {
 
 `tools: ['*']` 通配符意味着通用 Agent 有完整能力——可以修改文件、运行命令、甚至再启动子 Agent。
 
-### 7.6.3 Verification Agent：对抗性验证专家
+### 6.6.3 Verification Agent：对抗性验证专家
 
 这是三个内置 Agent 里**设计最复杂**的一个（系统提示约 130 行），专门在任务完成后试图"破坏"实现，输出 `VERDICT: PASS / FAIL / PARTIAL`。
 
@@ -285,7 +285,7 @@ export const VERIFICATION_AGENT: BuiltInAgentDefinition = {
 
 ---
 
-## 7.7 查询链跟踪（Query Chain Tracking）
+## 6.7 查询链跟踪（Query Chain Tracking）
 
 编排链上的所有 Agent 通过 `QueryChainTracking` 关联：
 
@@ -318,7 +318,7 @@ const queryTracking = toolUseContext.queryTracking
 
 ---
 
-## 7.8 Swarm 模式（InProcessTeammate）
+## 6.8 Swarm 模式（InProcessTeammate）
 
 Layer 4 的编排是 **Swarm 模式**：多个 Teammate 在同一进程中持续运行，共享团队上下文，由 Leader 调度任务。
 
@@ -400,7 +400,7 @@ Swarm / Coordinator Mode 目前仅对 Anthropic 内部用户（`USER_TYPE === 'a
 
 ---
 
-## 7.9 SkillTool：用户自定义编排单元
+## 6.9 SkillTool：用户自定义编排单元
 
 除了内置 Agent，用户可以在 `~/.claude/skills/` 目录下创建 `SKILL.md` 文件，定义自己的专业化 Agent。Claude Code 会自动发现并注册为可调用的工具（`SkillTool`）。
 
@@ -417,7 +417,7 @@ AgentTool（内置）         SkillTool（用户自定义）
 
 ---
 
-## 7.10 编排的权衡与局限
+## 6.10 编排的权衡与局限
 
 ### 优势
 

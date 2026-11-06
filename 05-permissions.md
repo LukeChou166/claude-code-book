@@ -1,11 +1,11 @@
-# 第6章 权限系统：安全边界
+# 第5章 权限系统：安全边界
 
-> **前置知识**：第4章 Agentic Loop、第5章工具系统  
+> **前置知识**：第3章 Agentic Loop、第4章工具系统  
 > **关键文件**：`src/types/permissions.ts`、`src/Tool.ts`、`src/hooks/`、`src/utils/permissions/`
 
 ---
 
-## 6.1 解决什么问题
+## 5.1 解决什么问题
 
 编程助手拥有执行 shell 命令、修改文件、访问网络的能力，这是一把双刃剑：
 
@@ -18,7 +18,7 @@
 
 ---
 
-## 6.2 业界的做法
+## 5.2 业界的做法
 
 | 方案 | 代表产品 | 优点 | 缺点 |
 |------|----------|------|------|
@@ -29,7 +29,7 @@
 
 ---
 
-## 6.3 本项目的权限层次模型
+## 5.3 本项目的权限层次模型
 
 Claude Code 实现了一个**六级权限模式**（Permission Modes）：
 
@@ -56,7 +56,7 @@ export type InternalPermissionMode = ExternalPermissionMode | 'auto' | 'bubble'
 
 ---
 
-## 6.4 三类权限规则
+## 5.4 三类权限规则
 
 `ToolPermissionContext` 里有三套规则：
 
@@ -114,7 +114,7 @@ export type PermissionRuleSource =
 
 ---
 
-## 6.5 权限决策流程
+## 5.5 权限决策流程
 
 一次工具调用的权限检查流程：
 
@@ -154,7 +154,7 @@ AI 发出 tool_use 请求
 
 ---
 
-## 6.6 PermissionDecision：细粒度的决策类型
+## 5.6 PermissionDecision：细粒度的决策类型
 
 `PermissionDecision` 是一个 union 类型，三种行为各有详细字段：
 
@@ -199,7 +199,7 @@ type PermissionDenyDecision = {
 
 ---
 
-## 6.7 计划模式（Plan Mode）
+## 5.7 计划模式（Plan Mode）
 
 计划模式是权限系统中特别有价值的功能：
 
@@ -234,7 +234,7 @@ AI："我的计划是：
 
 ---
 
-## 6.8 自动分类器（Auto Mode）
+## 5.8 自动分类器（Auto Mode）
 
 对于 `bypassPermissions` 模式（无人值守的 CI 场景），有一个自动安全分类器评估操作是否安全：
 
@@ -264,7 +264,7 @@ export type YoloClassifierResult = {
 
 ---
 
-## 6.9 Hooks 系统：可编程的权限扩展
+## 5.9 Hooks 系统：可编程的权限扩展
 
 Hooks 是权限系统的扩展点，允许用户用脚本实现自定义逻辑：
 
@@ -324,7 +324,7 @@ type HookType =
 
 ---
 
-## 6.10 工作目录权限
+## 5.10 工作目录权限
 
 Claude Code 的文件操作只允许在**授权目录**内进行：
 
@@ -339,7 +339,7 @@ readonly additionalWorkingDirectories: ReadonlyMap<string, AdditionalWorkingDire
 
 ---
 
-## 6.11 优势与不足
+## 5.11 优势与不足
 
 ### 优势
 

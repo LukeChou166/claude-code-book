@@ -1,6 +1,6 @@
-# 第1章 整体架构总览 — 代码问答笔记
+# 第1章 整体架构与启动 — 代码问答笔记
 
-本文件记录阅读 `01-architecture-overview.md` 过程中对具体代码的问答，作为正文章节的补充。
+本文件记录阅读 `01-agent-architecture.md` 过程中对具体代码的问答，作为正文章节的补充。
 
 ---
 
@@ -39,50 +39,47 @@ claude-code-sourcemap/
 
 ---
 
-## Q2：启动流程（`main.tsx`）是如何工作的？
+## Q2：启动流程（`main.tsx`）中与 Agent 相关的部分是怎样的？
 
-`main.tsx` 共约 4700 行，启动顺序经过精心设计。最关键的细节是：**前三个副作用在所有 `import` 语句之前就执行**：
+启动链路中与 Agent 能力直接相关的环节是**工具装配**和**记忆加载**，它们决定了 Agent "能做什么"和"知道什么"：
+
+```
+main.tsx 入口
+    │
+    ├── 解析命令行参数 (Commander.js)
+    ├── init()                 — 基础配置与环境初始化
+    ├── getTools(config)       — 按权限/Feature Flag 装配工具列表  ← Agent 能力边界
+    ├── 连接 MCP 服务器        — 外部工具接入
+    └── launchRepl() / headless — 启动 TUI 或 headless CLI
+```
+
+### 工具装配：getTools()
 
 ```typescript
-// src/main.tsx 第 9-20 行
-import { profileCheckpoint, profileReport } from './utils/startupProfiler.js';
-profileCheckpoint('main_tsx_entry');  // ① 性能打点：记录入口时间戳
-
-import { startMdmRawRead } from './utils/settings/mdm/rawRead.js';
-startMdmRawRead();  // ② 并行启动 MDM 策略读取（macOS plutil / Windows 注册表，50-100ms）
-
-import { startKeychainPrefetch } from './utils/secureStorage/keychainPrefetch.js';
-startKeychainPrefetch();  // ③ 并行启动 Keychain 读取（OAuth token + API Key，65ms）
+// src/tools.ts 第 193-251 行
+export function getAllBaseTools(): Tools {
+  return [
+    AgentTool, TaskOutputTool, BashTool,
+    ...(hasEmbeddedSearchTools() ? [] : [GlobTool, GrepTool]),
+    FileReadTool, FileEditTool, FileWriteTool,
+    NotebookEditTool, WebFetchTool, TodoWriteTool,
+    WebSearchTool, AskUserQuestionTool, SkillTool,
+    EnterPlanModeTool, ExitPlanModeV2Tool,
+    // ant 内部专用
+    ...(process.env.USER_TYPE === 'ant' ? [ConfigTool, TungstenTool] : []),
+    // Feature Flag 控制
+    ...(SleepTool ? [SleepTool] : []),              // PROACTIVE/KAIROS
+    ...(WorkflowTool ? [WorkflowTool] : []),         // WORKFLOW_SCRIPTS
+    ...(SnipTool ? [SnipTool] : []),                 // HISTORY_SNIP
+    // ...共 30+ 个工具
+  ]
+}
 ```
 
-JS 模块顶层代码在 `import` 语句执行完后才继续运行，而 `import` 语句本身需要约 135ms（依赖图加载）。这三个调用把"等待时间"藏进"必然的等待时间"里，节省了约 65ms 的 Keychain 读取时间和 50-100ms 的 MDM 读取时间。
-
-完整启动顺序：
-
-```
-① profileCheckpoint('main_tsx_entry')
-② startMdmRawRead()        — 后台并行：MDM 策略读取
-③ startKeychainPrefetch()  — 后台并行：OAuth token + API Key
-     ↓ （约 135ms 的模块加载期间，上面两个任务并发执行）
-④ init()                   — 遥测、认证、路由初始化
-⑤ getTools()               — 按权限/Feature Flag 装配工具列表
-⑥ launchRepl() / headless  — 启动 TUI 或 headless CLI
-```
-
-### Feature Flag 机制（Bun DCE）
-
-```typescript
-// src/main.tsx 第 76-81 行
-const coordinatorModeModule = feature('COORDINATOR_MODE')
-  ? require('./coordinator/coordinatorMode.js')
-  : null;
-
-const assistantModule = feature('KAIROS')
-  ? require('./assistant/index.js')
-  : null;
-```
-
-`feature('FLAG')` 是 Bun 的编译期 **Dead Code Elimination**：构建时如果 `FLAG=false`，整个三元表达式的 false 分支从打包产物中物理删除，类似 C 语言的 `#ifdef`。这让 Anthropic 用同一份代码库构建外部版和内部版（`ant` 用户版）。
+要点：
+- Feature Flag 在这里的作用是**控制 Agent 的能力边界**：flag 未开启的工具不会进入工具列表，AI 从一开始就"不知道"这个能力存在
+- MCP 服务器连接成功后，其暴露的工具会被适配成 `Tool` 接口合并进列表，对 Agent 而言与内置工具调用方式完全一致
+- 最终用 `uniqBy(tools, t => t.name)` 去重，防止重名工具导致 AI 调用混乱
 
 ---
 

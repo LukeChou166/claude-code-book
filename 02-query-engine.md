@@ -1,11 +1,11 @@
-# 第3章 QueryEngine：对话会话引擎
+# 第2章 QueryEngine：对话会话引擎
 
-> **前置知识**：第1章整体架构、第2章启动流程  
+> **前置知识**：第1章 整体架构与启动  
 > **关键文件**：`src/QueryEngine.ts`（约1300行）、`src/query.ts`、`src/types/message.ts`
 
 ---
 
-## 3.1 解决什么问题
+## 2.1 解决什么问题
 
 有了 AI 模型 API，要构建编程助手，最简单的做法是：
 1. 收到用户消息
@@ -25,7 +25,7 @@
 
 ---
 
-## 3.2 业界的做法
+## 2.2 业界的做法
 
 **LangChain** 的方式：
 ```python
@@ -54,7 +54,7 @@ while run.status != 'completed':
 
 ---
 
-## 3.3 QueryEngine 类的设计
+## 2.3 QueryEngine 类的设计
 
 ### 一个 QueryEngine 对应一次对话
 
@@ -127,7 +127,7 @@ export type QueryEngineConfig = {
 
 ---
 
-## 3.4 submitMessage：一次轮次的生命周期
+## 2.4 submitMessage：一次轮次的生命周期
 
 `submitMessage()` 是 SDK 对外暴露的核心方法，返回异步迭代器：
 
@@ -211,7 +211,7 @@ const wrappedCanUseTool: CanUseToolFn = async (
 
 ---
 
-## 3.5 消息类型系统
+## 2.5 消息类型系统
 
 `types/message.ts` 定义了完整的消息 union 类型：
 
@@ -246,7 +246,7 @@ type TombstoneMessage = {
 
 ---
 
-## 3.6 QueryEngine 与 query.ts 的关系
+## 2.6 QueryEngine 与 query.ts 的关系
 
 这两个模块的分工非常清晰：
 
@@ -276,7 +276,7 @@ QueryEngine.ts（状态层）
 
 ---
 
-## 3.7 SDK 使用示例
+## 2.7 SDK 使用示例
 
 QueryEngine 被设计为可以被外部程序嵌入。以下是 SDK 模式的使用方式（简化示意）：
 
@@ -312,7 +312,7 @@ console.log('Token 用量:', engine.getUsage())
 
 ---
 
-## 3.8 token 追踪与成本管理
+## 2.8 token 追踪与成本管理
 
 ```typescript
 // src/cost-tracker.ts（简化）
@@ -342,7 +342,7 @@ export function getTotalCost(): number {
 
 ---
 
-## 3.9 优势与不足
+## 2.9 优势与不足
 
 ### 优势
 

@@ -1,11 +1,11 @@
-# 第5章 工具系统：让 AI 拥有手
+# 第4章 工具系统：让 AI 拥有手
 
-> **前置知识**：第1章整体架构、第4章 Agentic Loop  
+> **前置知识**：第1章 整体架构与启动、第3章 Agentic Loop  
 > **关键文件**：`src/Tool.ts`（约793行）、`src/tools.ts`、`src/tools/GrepTool/GrepTool.ts`
 
 ---
 
-## 5.1 解决什么问题
+## 4.1 解决什么问题
 
 大语言模型本质上是一个**文本生成器**——它只能输入文字，输出文字。要让 AI 真正地操作代码（读文件、写文件、执行命令），需要一套机制把 AI 的"文字意图"转化为真实的系统操作。
 
@@ -20,7 +20,7 @@
 
 ---
 
-## 5.2 业界的做法
+## 4.2 业界的做法
 
 **OpenAI Function Calling**：开发者用 JSON Schema 描述工具，API 自动解析 AI 的函数调用。简单，但：
 - 没有内置运行时参数验证
@@ -34,7 +34,7 @@
 
 ---
 
-## 5.3 Tool 接口：统一的关注点容器
+## 4.3 Tool 接口：统一的关注点容器
 
 `Tool.ts` 定义了一个极其完整的 `Tool` 接口（约 350 行），把所有关注点统一在一个地方：
 
@@ -93,9 +93,9 @@ export type Tool<Input, Output, P extends ToolProgressData> = {
 
 ---
 
-## 5.4 关键属性深度解析
+## 4.4 关键属性深度解析
 
-### 5.4.1 `inputSchema`：Zod 驱动的双重保障
+### 4.4.1 `inputSchema`：Zod 驱动的双重保障
 
 所有工具的输入参数用 Zod schema 定义：
 
@@ -129,7 +129,7 @@ const inputSchema = lazySchema(() =>
 
 **`semanticNumber` 和 `semanticBoolean`**：AI 有时会把数字作为字符串传来（`"5"` 而不是 `5`），或布尔值作为字符串（`"true"` 而不是 `true`）。这两个辅助函数扩展了 Zod 的解析逻辑，让工具对这种情况更宽容。
 
-### 5.4.2 `isConcurrencySafe` vs `isReadOnly`
+### 4.4.2 `isConcurrencySafe` vs `isReadOnly`
 
 这两个方法名字相近但含义不同：
 
@@ -144,7 +144,7 @@ const inputSchema = lazySchema(() =>
 - `BashTool("ls .")`: `isReadOnly = true`，`isConcurrencySafe = false`（因为 ls 看到的目录状态可能被同时执行的写操作影响）
 - `FileEditTool`：`isReadOnly = false`，`isConcurrencySafe = false`
 
-### 5.4.3 `interruptBehavior`
+### 4.4.3 `interruptBehavior`
 
 ```typescript
 interruptBehavior?(): 'cancel' | 'block'
@@ -156,7 +156,7 @@ interruptBehavior?(): 'cancel' | 'block'
 
 没有实现此方法时默认 `'block'`（更保守，更安全）。
 
-### 5.4.4 `maxResultSizeChars`：防止上下文爆炸
+### 4.4.4 `maxResultSizeChars`：防止上下文爆炸
 
 ```typescript
 // src/Tool.ts 第 459-468 行
@@ -178,7 +178,7 @@ maxResultSizeChars: number
 
 **GrepTool** 的阈值是 `20_000` 字符。如果搜索结果超过 20K 字符（比如在大型代码库中搜索一个常见单词），结果会被保存到临时文件，AI 收到的是 `"Results saved to /tmp/grep_result_xxxx.txt. Preview: ..."` 这样的消息。
 
-### 5.4.5 `buildTool`：fail-safe 默认值工厂
+### 4.4.5 `buildTool`：fail-safe 默认值工厂
 
 ```typescript
 // src/Tool.ts 第 757-791 行
@@ -209,7 +209,7 @@ export function buildTool<D extends AnyToolDef>(def: D): BuiltTool<D> {
 
 ---
 
-## 5.5 GrepTool 深度解析
+## 4.5 GrepTool 深度解析
 
 `GrepTool` 是使用最频繁的代码搜索工具，底层调用 [ripgrep](https://github.com/BurntSushi/ripgrep)：
 
@@ -270,7 +270,7 @@ async call({ pattern, path, glob, output_mode, head_limit, ... }, { abortControl
 
 ---
 
-### 5.5.1 为什么不直接用 `Bash` 调 ripgrep，而要单独封装 GrepTool？
+### 4.5.1 为什么不直接用 `Bash` 调 ripgrep，而要单独封装 GrepTool？
 
 这是一个很自然的问题。既然 BashTool 可以执行任意命令，`rg -rn pattern src/` 也能搜索，为什么还要封装 GrepTool？
 
@@ -378,7 +378,7 @@ for (const ignorePattern of ignorePatterns) {
 
 用 BashTool 直接调 `rg` 不会经过这个逻辑，用户配置的 ignore 规则就被绕过了。
 
-#### 5. 可中断性：搜索可以被用户打断
+#### 4. 可中断性：搜索可以被用户打断
 
 GrepTool 把 `abortController.signal` 传入 `ripGrep()` 调用：
 
@@ -404,7 +404,7 @@ const results = await ripGrep(args, absolutePath, abortController.signal)
 
 ---
 
-## 5.5.2 AskUserQuestionTool：AI 主动向用户提问
+## 4.5.2 AskUserQuestionTool：AI 主动向用户提问
 
 `AskUserQuestionTool` 是 Claude Code 中专门用于**人机交互决策**的工具——当 AI 遇到关键选择点，不确定该采取哪条路时，它会暂停执行流，向用户提出结构化的多选题，等待用户回答后再继续。
 
@@ -503,7 +503,7 @@ You can now continue with the user's answers in mind.
 
 ---
 
-## 5.6 工具懒加载（ToolSearchTool）
+## 4.6 工具懒加载（ToolSearchTool）
 
 当工具很多时，把所有工具描述都放进 system prompt 会消耗大量 token。`ToolSearchTool` 实现了工具的"按需发现"：
 
@@ -542,7 +542,7 @@ export const BashTool = buildTool({
 
 ---
 
-## 5.7 完整工具列表
+## 4.7 完整工具列表
 
 ```typescript
 // src/tools.ts（完整工具清单，简化）
@@ -585,11 +585,11 @@ const cronTools = feature('AGENT_TRIGGERS') ? [...] : []
 
 ---
 
-## 5.8 工具的完整生命周期：从定义到执行
+## 4.8 工具的完整生命周期：从定义到执行
 
 > **以 GrepTool 为例，走一遍完整流程**
 
-### 5.8.1 第一阶段：工具序列化为 API Schema
+### 4.8.1 第一阶段：工具序列化为 API Schema
 
 每次向 Claude API 发起请求前，工具列表需要转成 API 能理解的 JSON 格式。这由 `toolToAPISchema()` 完成：
 
@@ -655,7 +655,7 @@ export function zodToJsonSchema(schema: ZodTypeAny): JsonSchema7Type {
 
 ---
 
-### 5.8.2 第二阶段：模型返回 `tool_use` block
+### 4.8.2 第二阶段：模型返回 `tool_use` block
 
 API 以流式方式返回响应。当模型决定调用 GrepTool 时，返回的 JSON 流里包含：
 
@@ -676,7 +676,7 @@ API 以流式方式返回响应。当模型决定调用 GrepTool 时，返回的
 
 ---
 
-### 5.8.3 第三阶段：调度——串行还是并发？
+### 4.8.3 第三阶段：调度——串行还是并发？
 
 `runTools()` 先调用 `partitionToolCalls()` 把工具列表分批：
 
@@ -720,7 +720,7 @@ function partitionToolCalls(
 
 ---
 
-### 5.8.4 第四阶段：权限检查 → 执行 → 结果回填
+### 4.8.4 第四阶段：权限检查 → 执行 → 结果回填
 
 对每个工具，`checkPermissionsAndCallTool()` 按以下顺序处理：
 
@@ -758,7 +758,7 @@ function partitionToolCalls(
 
 ---
 
-### 5.8.5 完整调用链一览
+### 4.8.5 完整调用链一览
 
 ```
 getTools()
@@ -792,7 +792,7 @@ runTools(toolUseBlocks, ...)                 ← src/services/tools/toolOrchestr
 
 ---
 
-### 5.8.6 `tool.prompt()` 深度解析：description 如何设计
+### 4.8.6 `tool.prompt()` 深度解析：description 如何设计
 
 `toolToAPISchema()` 调用 `await tool.prompt(...)` 获取工具的 `description` 字段。**这个字符串直接作为行为指令注入到 Claude 的上下文**——它不是给人类读者的文档，而是写给模型看的使用说明书。
 
@@ -941,7 +941,7 @@ Pass 0 for unlimited (use sparingly — large result sets waste context).
 
 ---
 
-## 5.9 优势与不足
+## 4.9 优势与不足
 
 ### 优势
 

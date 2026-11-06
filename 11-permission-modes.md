@@ -1,11 +1,11 @@
-# 第12章 权限模式详解：从 Plan 到 Auto
+# 第11章 权限模式详解：从 Plan 到 Auto
 
-> **前置知识**：第4章 Agentic Loop、第6章 权限系统  
+> **前置知识**：第3章 Agentic Loop、第5章 权限系统  
 > **关键文件**：`src/types/permissions.ts`、`src/utils/permissions/PermissionMode.ts`、`src/utils/permissions/permissionSetup.ts`、`src/utils/permissions/getNextPermissionMode.ts`、`src/utils/permissions/yoloClassifier.ts`、`src/tools/ExitPlanModeTool/`、`src/tools/EnterPlanModeTool/`
 
 ---
 
-## 12.1 为什么需要多种模式
+## 11.1 为什么需要多种模式
 
 用户和 AI 之间的"信任程度"天然不是二元的。考虑以下场景：
 
@@ -20,7 +20,7 @@ Cursor 用 **Ask / Agent / Plan** 这样按"意图"划分的模式解决这个�
 
 ---
 
-## 12.2 五种权限模式全景
+## 11.2 五种权限模式全景
 
 ```typescript
 // src/types/permissions.ts
@@ -44,13 +44,13 @@ default  →  acceptEdits  →  plan  →  (bypassPermissions)  →  (auto)  →
 
 ---
 
-## 12.3 模式0：Plan Mode（计划模式）
+## 11.3 模式0：Plan Mode（计划模式）
 
-### 12.3.1 核心思想
+### 11.3.1 核心思想
 
 Plan Mode 是 Claude Code 最具特色的模式。它的核心约束极其简单：**AI 只能读，不能写**。它的价值在于给用户一个"干跑（dry run）"的机会，在任何真实修改发生之前，先看到 AI 的完整行动方案。
 
-### 12.3.2 进入 Plan Mode 的三种路径
+### 11.3.2 进入 Plan Mode 的三种路径
 
 **路径一：用户手动触发 `/plan` 命令**
 
@@ -87,7 +87,7 @@ export async function call(onDone, context, args) {
 
 直接以计划模式启动整个会话，适合"只让 AI 分析，永远不执行"的只读工作流。
 
-### 12.3.3 Plan Mode 的内部机制
+### 11.3.3 Plan Mode 的内部机制
 
 进入 Plan Mode 时，`prepareContextForPlanMode()` 做了几件关键事：
 
@@ -106,7 +106,7 @@ export function prepareContextForPlanMode(
 
 `prePlanMode` 的作用是"模式快照"——无论用户在什么模式下进入 Plan，退出时都能精确回到原来的模式，而不是统一退回 `default`。
 
-### 12.3.4 Plan Mode 的执行时提示词注入
+### 11.3.4 Plan Mode 的执行时提示词注入
 
 进入 Plan Mode 后，每轮对话都会向 AI 注入一段强制性的系统提示（`src/utils/messages.ts`）：
 
@@ -122,7 +122,7 @@ any other instructions you have received.
 
 唯一的例外：AI 可以写**计划文件**（`PLAN.md`），这是 Plan Mode 中唯一允许的写操作。
 
-### 12.3.5 两种计划工作流
+### 11.3.5 两种计划工作流
 
 两种工作流通过同一个入口函数切换，核心是 `messages.ts` 里的 `getPlanModeV2Instructions()`：
 
@@ -209,7 +209,7 @@ const workflowDescription = isPlanModeInterviewPhaseEnabled()
   : 'Follow 5-phase workflow.'
 ```
 
-### 12.3.6 ExitPlanMode：用户审批流程
+### 11.3.6 ExitPlanMode：用户审批流程
 
 `ExitPlanMode` 工具（V2 版本）本身**不接受计划内容作为参数**，它只是一个"我写完了，来看看"的信号。系统从计划文件中读取内容展示给用户。
 
@@ -236,7 +236,7 @@ User has approved your plan. You can now start coding.
 
 这告诉 AI："计划被批准了，现在可以开始执行了"。
 
-### 12.3.7 Plan Mode + 多 Agent 协作
+### 11.3.7 Plan Mode + 多 Agent 协作
 
 当 `COORDINATOR_MODE` 启用且任务可并行时，`ExitPlanMode` 的审批信息里还会提示：
 
@@ -245,11 +245,11 @@ If this plan can be broken down into multiple independent tasks,
 consider using the TeamCreate tool to create a team and parallelize the work.
 ```
 
-AI 可以在计划批准后立即拆分任务，派生多个子 Agent 并行执行（详见第7章）。
+AI 可以在计划批准后立即拆分任务，派生多个子 Agent 并行执行（详见第6章）。
 
 ---
 
-### 12.3.8 Plan Mode 的三道防线：如何保证模型不乱执行
+### 11.3.8 Plan Mode 的三道防线：如何保证模型不乱执行
 
 Plan Mode 的核心约束是"只能读不能写"。但大模型不是强规则型的——它可能"不小心"调用了 `FileEditTool`。系统用**三道独立的防线**确保模型无法在用户不知情的情况下写入文件，每道防线都无法被模型绕过。
 
@@ -386,7 +386,7 @@ EnterPlanMode 触发
 
 ---
 
-### 12.3.9 执行阶段的步骤保证：软约束而非强执行
+### 11.3.9 执行阶段的步骤保证：软约束而非强执行
 
 #### 计划批准后，模型不一定按步骤执行
 
@@ -470,9 +470,9 @@ const VerifyPlanExecutionTool =
 
 ---
 
-## 12.4 模式1：Default Mode（默认模式）
+## 11.4 模式1：Default Mode（默认模式）
 
-### 12.4.1 核心行为
+### 11.4.1 核心行为
 
 Default 模式是最接近"有条件信任"的模式：
 
@@ -482,7 +482,7 @@ Default 模式是最接近"有条件信任"的模式：
   - 纯读操作命令（`ls`、`cat`、`git status` 等）：自动允许
   - 写操作命令（`rm`、`git commit` 等）：弹窗询问
 
-### 12.4.2 Bash 命令的"只读检测"
+### 11.4.2 Bash 命令的"只读检测"
 
 BashTool 有一个精心维护的**只读命令白名单**（`src/tools/BashTool/readOnlyValidation.ts`），涵盖超过 100 个安全命令：
 
@@ -500,7 +500,7 @@ const READONLY_COMMANDS = [
 - 重定向到文件（`>`、`>>`）
 - 执行任意脚本（`eval`、`source`）
 
-### 12.4.3 工作目录边界
+### 11.4.3 工作目录边界
 
 Default 模式下，文件操作被严格限制在**授权目录**内：
 
@@ -514,9 +514,9 @@ Default 模式下，文件操作被严格限制在**授权目录**内：
 
 ---
 
-## 12.5 模式2：Accept Edits（接受编辑模式）
+## 11.5 模式2：Accept Edits（接受编辑模式）
 
-### 12.5.1 核心行为
+### 11.5.1 核心行为
 
 Accept Edits 模式在 Default 基础上，自动批准**所有文件编辑操作**：
 
@@ -537,7 +537,7 @@ const ACCEPT_EDITS_ALLOWED_COMMANDS = [
 
 注意：`sed` 命令的允许是有条件的——即使在 Accept Edits 模式下，`sed` 的危险操作（`w`/`W` 写入文件、`e`/`E` 执行命令）仍然会被拦截（`src/tools/BashTool/sedValidation.ts`）。
 
-### 12.5.2 适用场景
+### 11.5.2 适用场景
 
 Accept Edits 是"我信任这个 AI 写代码，但还是想对非文件操作保持警惕"的最佳平衡点。典型使用场景：
 
@@ -546,9 +546,9 @@ Accept Edits 是"我信任这个 AI 写代码，但还是想对非文件操作�
 
 ---
 
-## 12.6 模式3：Bypass Permissions（绕过权限模式）
+## 11.6 模式3：Bypass Permissions（绕过权限模式）
 
-### 12.6.1 核心行为
+### 11.6.1 核心行为
 
 Bypass Permissions 完全跳过所有权限检查，等价于"我完全信任 AI"。
 
@@ -556,14 +556,14 @@ Bypass Permissions 完全跳过所有权限检查，等价于"我完全信任 AI
 
 **适用场景**：无人值守的 CI/CD 环境。
 
-### 12.6.2 安全防线
+### 11.6.2 安全防线
 
 即使在 Bypass Permissions 模式下，也有两个无法绕过的安全机制：
 
 1. **工作目录边界**：仍然无法访问授权目录之外的文件
 2. **Yolo 分类器（可选）**：Anthropic 内部有一个额外的 AI 安全分类器，即使在 bypass 模式下也能对可疑操作发出警告
 
-### 12.6.3 Yolo 分类器
+### 11.6.3 Yolo 分类器
 
 这是 Claude Code 对全自动执行风险的安全补偿机制（`src/utils/permissions/yoloClassifier.ts`）：
 
@@ -602,15 +602,15 @@ if (classifierDecisionModule.isAutoModeAllowlistedTool(tool.name)) {
 
 ---
 
-## 12.7 模式4：Auto Mode（自动模式，内部特性）
+## 11.7 模式4：Auto Mode（自动模式，内部特性）
 
 Auto Mode 是 `TRANSCRIPT_CLASSIFIER` Feature Flag 控制的内部模式，目前仅对 Anthropic 内部用户（`USER_TYPE === 'ant'`）开放。它代表了 Claude Code 对"智能权限决策"的最新探索。
 
-### 12.7.1 核心思想
+### 11.7.1 核心思想
 
 Auto Mode 不是简单地"允许一切"，而是用**另一个 AI 实例**实时评估每个操作的安全性，取代人工确认。用户设定意图（"允许写测试文件"、"不允许推送到远程"），分类器在此边界内自主决策。
 
-### 12.7.2 进入 Auto Mode 的条件
+### 11.7.2 进入 Auto Mode 的条件
 
 ```typescript
 // src/utils/permissions/getNextPermissionMode.ts
@@ -628,7 +628,7 @@ function canCycleToAuto(ctx: ToolPermissionContext): boolean {
 1. `ctx.isAutoModeAvailable`：启动时检查（模型是否支持、账户是否开启）
 2. `isAutoModeGateEnabled()`：GrowthBook 实时远程开关（支持熔断）
 
-### 12.7.3 危险权限剥离
+### 11.7.3 危险权限剥离
 
 进入 Auto Mode 时，有一个重要的安全动作——**剥离用户已预配置的危险权限规则**：
 
@@ -645,7 +645,7 @@ export function stripDangerousPermissionsForAutoMode(
 
 举例：如果用户之前配置了 `Bash(*)` 规则（允许任何 bash 命令），在 Auto Mode 下这条规则会被临时移除，强制所有 bash 命令经过分类器评估。
 
-### 12.7.4 Auto Mode + Plan Mode 的组合
+### 11.7.4 Auto Mode + Plan Mode 的组合
 
 `shouldPlanUseAutoMode()` 允许在 Plan Mode 下也启用 Auto Mode 的分类器语义：
 
@@ -655,7 +655,7 @@ export function stripDangerousPermissionsForAutoMode(
 // 目的：让分类器学习任务上下文，为后续执行阶段做准备
 ```
 
-### 12.7.5 Auto Mode 的连续拒绝保护
+### 11.7.5 Auto Mode 的连续拒绝保护
 
 一个防止分类器"过于谨慎"而陷入死循环的机制：
 
@@ -674,9 +674,9 @@ type DenialTrackingState = {
 
 ---
 
-## 12.8 权限决策的完整调用链
+## 11.8 权限决策的完整调用链
 
-一次工具调用的完整权限决策流程，比第6章的描述更详细：
+一次工具调用的完整权限决策流程，比第5章的描述更详细：
 
 ```
 AI 发出 tool_use 请求
@@ -720,7 +720,7 @@ AI 发出 tool_use 请求
 
 ---
 
-## 12.9 关键设计决策解析
+## 11.9 关键设计决策解析
 
 ### 为什么权限上下文是不可变的（DeepImmutable）
 
@@ -762,7 +762,7 @@ if (fromMode === 'plan' && toMode !== 'plan' && context.prePlanMode) {
 
 ---
 
-## 12.10 在源码中找到这些逻辑
+## 11.10 在源码中找到这些逻辑
 
 | 功能 | 文件 | 关键函数 |
 |------|------|---------|
