@@ -1,11 +1,11 @@
-# 第9章 记忆系统：让 AI 跨会话学习
+# 第8章 记忆系统：让 AI 跨会话学习
 
-> **前置知识**：第2章启动流程、第3章 QueryEngine  
+> **前置知识**：第1章 整体架构与启动、第2章 QueryEngine  
 > **关键文件**：`src/memdir/memdir.ts`、`src/memdir/memoryTypes.ts`、`src/memdir/findRelevantMemories.ts`、`src/services/SessionMemory/sessionMemory.ts`
 
 ---
 
-## 9.1 解决什么问题
+## 8.1 解决什么问题
 
 大语言模型本身是无状态的——每次对话开始，模型对你一无所知：
 
@@ -18,7 +18,7 @@
 
 ---
 
-## 9.2 业界的做法
+## 8.2 业界的做法
 
 | 方案 | 代表 | 优点 | 缺点 |
 |------|------|------|------|
@@ -32,7 +32,7 @@ Claude Code 选择了**本地文件系统 + AI 主动写入**的方案：记忆�
 
 ---
 
-## 9.3 记忆的四种类型
+## 8.3 记忆的四种类型
 
 `src/memdir/memoryTypes.ts` 定义了严格的四类记忆分类法，每类捕获不同维度的知识：
 
@@ -88,7 +88,7 @@ export const WHAT_NOT_TO_SAVE_SECTION = [
 
 ---
 
-## 9.4 存储结构：MEMORY.md 索引 + 独立文件
+## 8.4 存储结构：MEMORY.md 索引 + 独立文件
 
 记忆存储在一个专用目录下：
 
@@ -145,7 +145,7 @@ export const MAX_ENTRYPOINT_BYTES = 25_000  // 约 25KB
 
 ---
 
-## 9.5 两级加载：索引总是加载，详情按需检索
+## 8.5 两级加载：索引总是加载，详情按需检索
 
 ### 第一级：索引自动注入（每次会话）
 
@@ -210,7 +210,7 @@ Sonnet（小模型，便宜快）负责从描述中判断哪 5 条记忆最相�
 
 ---
 
-## 9.6 记忆的自动提取（Background Extract）
+## 8.6 记忆的自动提取（Background Extract）
 
 Claude Code 还有一个后台记忆提取机制（`EXTRACT_MEMORIES` feature flag），会话结束后自动运行：
 
@@ -257,7 +257,7 @@ const DEFAULT_SESSION_MEMORY_CONFIG = {
 
 ---
 
-## 9.7 记忆的验证：防止过时记忆误导
+## 8.7 记忆的验证：防止过时记忆误导
 
 过时的记忆是危险的，比没有记忆更坏：
 
@@ -295,7 +295,7 @@ export const MEMORY_DRIFT_CAVEAT =
 
 ---
 
-## 9.8 团队记忆（TEAMMEM）
+## 8.8 团队记忆（TEAMMEM）
 
 当多人在同一代码库工作时，某些知识应该共享（测试规范、合并冻结）：
 
@@ -317,7 +317,7 @@ export const MEMORY_DRIFT_CAVEAT =
 
 ---
 
-## 9.9 助手模式的日志式记忆（KAIROS）
+## 8.9 助手模式的日志式记忆（KAIROS）
 
 长时间运行的助手模式（`feature('KAIROS')`）有不同的记忆策略：
 
@@ -350,7 +350,7 @@ function buildAssistantDailyLogPrompt(): string {
 
 ---
 
-## 9.10 记忆系统的完整生命周期
+## 8.10 记忆系统的完整生命周期
 
 ```
 第一次会话
@@ -376,7 +376,7 @@ function buildAssistantDailyLogPrompt(): string {
 
 ---
 
-## 9.11 与其他持久化机制的区别
+## 8.11 与其他持久化机制的区别
 
 ```typescript
 // src/memdir/memdir.ts 第 254-258 行
@@ -396,7 +396,7 @@ function buildAssistantDailyLogPrompt(): string {
 
 ---
 
-## 9.12 优势与不足
+## 8.12 优势与不足
 
 ### 优势
 

@@ -1,11 +1,11 @@
-# 第15章 5层安全体系：AI 的纵深防御
+# 第14章 5层安全体系：AI 的纵深防御
 
-> **前置知识**：第6章 权限系统、第12章 权限模式  
+> **前置知识**：第5章 权限系统、第11章 权限模式  
 > **关键文件**：`src/constants/prompts.ts`、`src/types/permissions.ts`、`src/utils/sandbox/sandbox-adapter.ts`、`src/tools/EnterPlanModeTool/`、`src/utils/hooks.ts`、`src/QueryEngine.ts`
 
 ---
 
-## 15.1 为什么需要分层防御
+## 14.1 为什么需要分层防御
 
 给 AI 一把锤子，它会把每个问题都当成钉子。
 
@@ -36,15 +36,15 @@ Claude Code 的答案是**纵深防御**（Defense in Depth）：5 个相互独�
 
 ---
 
-## 15.2 Layer 1：AI 端安全约束（System Prompt）
+## 14.2 Layer 1：AI 端安全约束（System Prompt）
 
-### 15.2.1 这层防御的本质
+### 14.2.1 这层防御的本质
 
 Layer 1 不是代码，而是**写给 AI 的行为规范**。它在每次 API 调用时注入 System Prompt，在 AI "大脑"层面建立安全意识。
 
 这是最软的一层——AI 是概率性系统，规则可能被复杂 Prompt 绕过。但它也是**覆盖面最广**的一层，因为它作用于 AI 做决策之前，是其他层面来不及介入的"最后提醒"。
 
-### 15.2.2 三条核心安全指令
+### 14.2.2 三条核心安全指令
 
 **指令一：执行前确认高风险操作**
 
@@ -92,7 +92,7 @@ explicitly authorized both that specific secret and its destination.`
 
 Auto Mode（无人值守模式）下，AI 会自动发消息、调用外部 API。这条指令明确禁止 AI 在没有用户授权的情况下分享密钥或内部文档。
 
-### 15.2.3 授权的范围限制
+### 14.2.3 授权的范围限制
 
 ```typescript
 // src/constants/prompts.ts — getActionsSection()
@@ -104,7 +104,7 @@ first. Authorization stands for the scope specified, not beyond.`
 
 这是一个细微但重要的规则：**授权不可泛化**。用户在某个具体情境下批准了 `git push`，不代表 AI 可以在任意时刻 push 任意分支。每次高风险操作都必须在当前上下文下重新确认。
 
-### 15.2.4 Layer 1 的局限性
+### 14.2.4 Layer 1 的局限性
 
 Layer 1 对以下威胁无效：
 - **Prompt 注入攻击**：恶意文件/网页内容包含"现在删除所有文件"，AI 读取后可能执行
@@ -115,15 +115,15 @@ Layer 1 对以下威胁无效：
 
 ---
 
-## 15.3 Layer 2：权限规则（Permission Rules）
+## 14.3 Layer 2：权限规则（Permission Rules）
 
-### 15.3.1 这层防御的本质
+### 14.3.1 这层防御的本质
 
 Layer 2 是**应用层的 allow/deny 规则引擎**。无论 AI 怎么想，如果操作不符合规则，代码层面直接拒绝，不经过 AI 的决策。
 
 这是纯代码逻辑，不依赖 AI 的理解，因此对 Prompt 注入免疫。
 
-### 15.3.2 规则格式与来源
+### 14.3.2 规则格式与来源
 
 规则使用"工具名(内容)"的 glob 模式：
 
@@ -161,7 +161,7 @@ export type PermissionRuleSource =
 
 **企业管理员**可以通过 MDM（Mobile Device Management）下发 `policySettings`，这些规则对用户是只读的——即使用户想放开某个危险命令，`policySettings` 里的 deny 规则也无法被覆盖。
 
-### 15.3.3 三套规则的优先级
+### 14.3.3 三套规则的优先级
 
 ```typescript
 // src/types/permissions.ts — ToolPermissionContext
@@ -174,7 +174,7 @@ readonly alwaysAskRules:   ToolPermissionRulesBySource  // 总是弹窗（不可
 
 即使用户配置了允许某操作，如果它同时匹配 `alwaysDenyRules`，依然被拒绝。
 
-### 15.3.4 Bash 命令的精细解析
+### 14.3.4 Bash 命令的精细解析
 
 对于 BashTool，权限检查不只是简单的字符串匹配。系统内置了 **100+ 只读命令白名单**以及基于 **AST 的语法树安全分析**：
 
@@ -206,7 +206,7 @@ for (const r of cmd.redirects) {
 }
 ```
 
-### 15.3.5 不可变的权限上下文
+### 14.3.5 不可变的权限上下文
 
 ```typescript
 // src/types/permissions.ts
@@ -219,7 +219,7 @@ export type ToolPermissionContext = DeepReadonly<{
 
 `ToolPermissionContext` 是完全不可变的（`DeepReadonly`）。工具执行过程中**无法修改权限状态**——这从类型系统层面封死了权限提升攻击。权限变更必须通过 `applyPermissionUpdate()` 产生新对象。
 
-### 15.3.6 Layer 2 的局限性
+### 14.3.6 Layer 2 的局限性
 
 - 规则语法（glob 模式）对普通用户不友好，配置门槛高
 - 无法感知操作的**语义上下文**——同一个 `git push` 命令，推到个人分支和推到 `main` 的风险完全不同
@@ -227,15 +227,15 @@ export type ToolPermissionContext = DeepReadonly<{
 
 ---
 
-## 15.4 Layer 3：OS 级沙箱隔离（Sandbox）
+## 14.4 Layer 3：OS 级沙箱隔离（Sandbox）
 
-### 15.4.1 这层防御的本质
+### 14.4.1 这层防御的本质
 
 Layer 3 是**操作系统层面的强制访问控制**。即使 AI 绕过了前两层（Prompt 注入成功 + 规则被配置错误），沙箱依然会在内核层面拦截危险操作。
 
 沙箱对进程完全不透明——被沙箱化的 bash 进程"以为"自己在正常执行，但实际上文件写入被静默阻止，网络请求被路由到受限代理。
 
-### 15.4.2 两种实现：macOS vs Linux
+### 14.4.2 两种实现：macOS vs Linux
 
 ```
 macOS：sandbox-exec（Apple 的强制访问控制框架）
@@ -269,7 +269,7 @@ if (shouldUseSandbox) {
 }
 ```
 
-### 15.4.3 三维度沙箱约束
+### 14.4.3 三维度沙箱约束
 
 **维度一：文件系统约束**
 
@@ -323,7 +323,7 @@ annotateStderrWithSandboxFailures(command: string, stderr: string): string
 
 这让 AI 能"感知"到沙箱阻止了什么，从而改变策略，而不是陷入死循环。
 
-### 15.4.4 沙箱的特殊安全规则
+### 14.4.4 沙箱的特殊安全规则
 
 **防止 Git 沙箱逃逸**：
 
@@ -360,7 +360,7 @@ if (
 
 以 root 身份运行时，`bypassPermissions` 模式直接被禁止——即使是完全信任的 CI 环境，也不允许以 root + 无权限检查的组合运行。
 
-### 15.4.5 Layer 3 的局限性
+### 14.4.5 Layer 3 的局限性
 
 - 依赖 OS 特性，Windows 原生不支持（`bwrap`/`sandbox-exec` 是 POSIX 专有）
 - 需要安装依赖（`bubblewrap`、`socat`、`seccomp`），依赖缺失时沙箱静默降级——这是一个已知的"安全足枪"，代码注释中明确提到：
@@ -374,15 +374,15 @@ if (
 
 ---
 
-## 15.5 Layer 4：计划模式（Plan Mode）
+## 14.5 Layer 4：计划模式（Plan Mode）
 
-### 15.5.1 这层防御的本质
+### 14.5.1 这层防御的本质
 
 Layer 4 是一个**行为约束层**：在 AI 真正开始动手之前，强制进入一个"只读探索"的阶段。
 
 和前三层不同，Plan Mode 不是"阻止危险操作"，而是**提前暴露风险**——让用户在损失发生之前看到并审批 AI 的完整行动方案。
 
-### 15.5.2 Plan Mode 的核心机制
+### 14.5.2 Plan Mode 的核心机制
 
 进入 Plan Mode 时，系统向每轮对话注入一段不可绕过的强制提示：
 
@@ -406,7 +406,7 @@ the system. This supercedes any other instructions you have received.
 
 双重锁：**AI 主观层面**（System Prompt 约束）和**代码执行层面**（权限拒绝）同时生效。
 
-### 15.5.3 AI 主动触发 Plan Mode
+### 14.5.3 AI 主动触发 Plan Mode
 
 Plan Mode 不只是用户手动触发的保护机制——AI 被提示词引导在以下情况下**主动进入计划模式**：
 
@@ -420,7 +420,7 @@ Plan Mode 不只是用户手动触发的保护机制——AI 被提示词引导�
 
 这是 Layer 1（AI 的安全意识）和 Layer 4（计划模式约束）的协同——AI 不仅被告知"危险操作要小心"，还有一个明确的工具（`EnterPlanMode`）让它在不确定时主动降到安全的只读状态。
 
-### 15.5.4 Plan Mode 的 "Dry Run" 价值
+### 14.5.4 Plan Mode 的 "Dry Run" 价值
 
 ```
 用户："帮我重构这个 1000 行的模块"
@@ -439,7 +439,7 @@ AI 输出 PLAN.md：
 
 用户在任何实际修改发生之前就看到了完整的影响范围，并有机会调整方向。
 
-### 15.5.5 Layer 4 的局限性
+### 14.5.5 Layer 4 的局限性
 
 - 需要用户主动理解并审查计划，对初级用户的认知负担较重
 - 计划文件（`PLAN.md`）本身可能写得过于笼统，用户难以判断风险
@@ -447,16 +447,16 @@ AI 输出 PLAN.md：
 
 ---
 
-## 15.6 Layer 5：Hooks & 预算上限
+## 14.6 Layer 5：Hooks & 预算上限
 
-### 15.6.1 这层防御的本质
+### 14.6.1 这层防御的本质
 
 Layer 5 是**外部审计与量化约束**。它不阻止任何具体操作，而是：
 
 1. **Hooks**：在工具执行前后注入自定义脚本，实现外部审计、日志、合规检查
 2. **预算上限**：对 token 消耗和美元成本设置硬上限，防止无限循环和意外超支
 
-### 15.6.2 Hooks：可编程的外部审计
+### 14.6.2 Hooks：可编程的外部审计
 
 用户在 `.claude/settings.json` 中配置 Hook 脚本：
 
@@ -517,7 +517,7 @@ Hook 是纯外部脚本，不需要修改 Claude Code 源码，即可实现：
 - 危险命令二次确认（`rm -rf` 时触发 Slack 通知）
 - 自动化质量门禁（`Stop` Hook 检查测试是否通过，失败则要求 AI 继续）
 
-### 15.6.3 美元成本上限（maxBudgetUsd）
+### 14.6.3 美元成本上限（maxBudgetUsd）
 
 ```typescript
 // src/QueryEngine.ts
@@ -552,7 +552,7 @@ claude --max-budget-usd 5.00 "重构整个代码库"
 }
 ```
 
-### 15.6.4 Token 预算（task_budget）
+### 14.6.4 Token 预算（task_budget）
 
 除了美元上限，还有 token 维度的约束：
 
@@ -572,7 +572,7 @@ is a hard minimum, not a suggestion.`
 
 Token 预算有双重作用：既是**成本约束**，也是**任务完整性保障**——AI 被要求在预算内做尽可能完整的工作，而不是草草收场。
 
-### 15.6.5 Layer 5 的局限性
+### 14.6.5 Layer 5 的局限性
 
 - Hooks 是 shell 脚本，需要用户有脚本编写能力才能充分利用
 - 成本上限是事后检查（每次 API 调用后），无法阻止**单次**昂贵的 API 调用
@@ -580,7 +580,7 @@ Token 预算有双重作用：既是**成本约束**，也是**任务完整性�
 
 ---
 
-## 15.7 五层防御的协同关系
+## 14.7 五层防御的协同关系
 
 五层防御覆盖了不同的威胁场景：
 
@@ -598,7 +598,7 @@ Token 预算有双重作用：既是**成本约束**，也是**任务完整性�
 
 ---
 
-## 15.8 与业界方案的对比
+## 14.8 与业界方案的对比
 
 | 维度 | Claude Code | LangChain/AutoGPT | GitHub Copilot |
 |------|------------|-------------------|----------------|
@@ -614,7 +614,7 @@ Claude Code 在安全体系的**系统性**上明显优于开源框架方案，�
 
 ---
 
-## 15.9 对构建自己的 Agent 系统的启示
+## 14.9 对构建自己的 Agent 系统的启示
 
 如果你正在构建一个生产级 AI Agent 系统，这个五层框架提供了很好的参考：
 
@@ -630,7 +630,7 @@ Claude Code 在安全体系的**系统性**上明显优于开源框架方案，�
 
 ---
 
-## 15.10 关键源码位置
+## 14.10 关键源码位置
 
 | 层次 | 功能 | 文件 | 关键函数/位置 |
 |------|------|------|--------------|

@@ -1,11 +1,11 @@
-# 第13章 状态管理：一个极简自研 Store
+# 第12章 状态管理：一个极简自研 Store
 
-> **前置知识**：第1章 整体架构、第4章 Agentic Loop  
+> **前置知识**：第1章 整体架构与启动、第3章 Agentic Loop  
 > **关键文件**：`src/state/store.ts`、`src/state/AppStateStore.ts`、`src/state/AppState.tsx`、`src/state/onChangeAppState.ts`、`src/state/selectors.ts`
 
 ---
 
-## 13.1 解决什么问题
+## 12.1 解决什么问题
 
 任何有界面的应用都面临同一个挑战：**数据在哪里，谁来更新，谁来读取，更新后如何通知界面刷新？**
 
@@ -18,7 +18,7 @@ Claude Code 的界面是基于 [Ink](https://github.com/vadimdemedes/ink) 构建
 
 ---
 
-## 13.2 业界的做法
+## 12.2 业界的做法
 
 | 方案 | 代表 | 优点 | 缺点 |
 |------|------|------|------|
@@ -32,9 +32,9 @@ Claude Code 选择了**自研极简 Store**，核心思想借鉴自 Zustand：�
 
 ---
 
-## 13.3 本项目的做法（deep）
+## 12.3 本项目的做法（deep）
 
-### 13.3.1 最底层：35 行的 Store 实现
+### 12.3.1 最底层：35 行的 Store 实现
 
 ```1:34:restored-src/src/state/store.ts
 type Listener = () => void
@@ -79,7 +79,7 @@ export function createStore<T>(
 2. **`onChange` 副作用钩子**：每次状态真正变更后，先调用 `onChange`（同步），再通知 React 组件（同步）。这是状态持久化和远程同步的入口
 3. **`subscribe` 返回取消函数**：调用者拿到取消函数后，在组件卸载时调用它即可，无需记住当初传入的 listener 引用。C++ 中类似 `std::function<void()> unsubscribe = eventBus.on(event, handler);`
 
-### 13.3.2 AppState：全局状态的数据结构
+### 12.3.2 AppState：全局状态的数据结构
 
 `AppState` 是整个应用的"数据库"，定义在 `src/state/AppStateStore.ts` 中，是一个扁平的大对象。
 
@@ -105,7 +105,7 @@ export type AppState = DeepImmutable<{
 | **运行时配置** | `settings`, `verbose`, `mainLoopModel` | 用户配置，会持久化到磁盘 |
 | **UI 状态** | `expandedView`, `footerSelection`, `statusLineText` | 界面展示状态，不持久化 |
 | **任务系统** | `tasks`, `foregroundedTaskId`, `viewingAgentTaskId` | 当前运行的任务 |
-| **权限** | `toolPermissionContext` | 当前权限模式和规则（详见第12章） |
+| **权限** | `toolPermissionContext` | 当前权限模式和规则（详见第11章） |
 | **Bridge/远程** | `replBridgeEnabled`, `remoteConnectionStatus`, 10 个 `replBridge*` 字段 | Claude.ai 网页连接状态 |
 | **工具生态** | `mcp.clients`, `mcp.tools`, `plugins.enabled` | MCP 和插件注册表 |
 | **推测执行** | `speculation` | AI 预测下一步操作的状态（`idle`/`active`） |
@@ -123,7 +123,7 @@ export type AppState = DeepImmutable<{
 
 因为 `TaskState` 包含函数类型（如 `kill: () => void`），而 `DeepImmutable` 会把函数也变成只读，导致类型错误。所以 `tasks` 和 `agentNameRegistry` 被排除在深度不可变之外。
 
-### 13.3.3 Provider 层：React 的连接桥梁
+### 12.3.3 Provider 层：React 的连接桥梁
 
 `AppStateProvider` 是整个状态树的根，定义在 `src/state/AppState.tsx`：
 
@@ -154,7 +154,7 @@ export function AppStateProvider({ children, initialState, onChangeAppState }) {
 throw new Error("AppStateProvider can not be nested within another AppStateProvider")
 ```
 
-### 13.3.4 消费状态：useAppState + selector 精准订阅
+### 12.3.4 消费状态：useAppState + selector 精准订阅
 
 这是整个状态管理中最精妙的部分——通过 selector 实现"只有我用到的字段变化时，我才重渲染"：
 
@@ -199,7 +199,7 @@ const { text, promptId } = useAppState(s => s.promptSuggestion) // good
 | `selector(state)` | `std::function<T(AppState)> selector` |
 | `Object.is(prev, next)` | `prev == next`（对象地址比较或值比较） |
 
-### 13.3.5 更新状态：useSetAppState
+### 12.3.5 更新状态：useSetAppState
 
 ```typescript
 // src/state/AppState.tsx
@@ -228,7 +228,7 @@ setAppState(prev => ({
 1. 避免闭包里的过期值（C++ 中的 stale capture）
 2. 支持异步场景：两个并发的 `setAppState` 调用，第二个能看到第一个的结果
 
-### 13.3.6 副作用集中管理：onChangeAppState
+### 12.3.6 副作用集中管理：onChangeAppState
 
 每次 AppState 真正变更后，`onChangeAppState` 都会被同步调用。这是整个应用**副作用的单一入口**：
 
@@ -281,7 +281,7 @@ export function onChangeAppState({
 
 现在把副作用集中在 `onChangeAppState` 里，**无论哪个路径触发了状态变更，副作用都会自动执行**。这是"响应式编程"的精髓——不追踪"谁改了"，而是追踪"改成了什么"。
 
-### 13.3.7 非 React 代码如何访问状态
+### 12.3.7 非 React 代码如何访问状态
 
 工具执行器（如 BashTool）、API 调用层等非 React 代码，通过 `useAppStateStore()` 获取 Store 对象本身，然后传递给非 React 代码：
 
@@ -302,7 +302,7 @@ function handleBashResult(result, { getAppState, setAppState }) {
 }
 ```
 
-### 13.3.8 局部 Context 状态
+### 12.3.8 局部 Context 状态
 
 除了全局 `AppState`，项目还有若干局部 Context，用于隔离只有少数组件需要的状态：
 
@@ -328,7 +328,7 @@ const PromptOverlaySetterContext = createContext(null)
 
 ---
 
-## 13.4 优势与不足
+## 12.4 优势与不足
 
 ### 优势
 
@@ -354,7 +354,7 @@ const PromptOverlaySetterContext = createContext(null)
 
 ---
 
-## 13.5 在源码中找到这些逻辑
+## 12.5 在源码中找到这些逻辑
 
 | 功能 | 文件 | 关键函数/行号 |
 |------|------|-------------|

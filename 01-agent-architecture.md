@@ -1,6 +1,6 @@
-# 第1章 整体架构总览
+# 第1章 整体架构与启动
 
-> **前置知识**：了解 TypeScript 基础语法，知道什么是 CLI 工具  
+> **前置知识**：了解 TypeScript 基础语法，知道什么是 CLI 工具
 > **关键文件**：`src/main.tsx`、`src/query.ts`、`src/Tool.ts`、`src/tools.ts`
 
 ---
@@ -38,7 +38,7 @@ Claude Code 的目标是构建一个**真正的编程智能体（Coding Agent）
 
 ---
 
-## 1.3 本项目的做法：四层架构
+## 1.3 整体架构：四层结构
 
 读完代码，可以归纳出一个清晰的四层架构：
 
@@ -69,7 +69,7 @@ Claude Code 的目标是构建一个**真正的编程智能体（Coding Agent）
 
 ---
 
-## 1.4 信息流：一次用户输入如何变成代码修改
+## 1.4 信息流：一次输入如何变成代码修改
 
 以用户输入 `"帮我修复 src/utils.ts 里的 bug"` 为例，整个请求链路：
 
@@ -147,7 +147,9 @@ sequenceDiagram
 
 ---
 
-### 异步生成器（AsyncGenerator）作为流式管道
+## 1.5 Agent 的流式事件管道与工具输入校验容错
+
+### 流式事件驱动：AsyncGenerator 作为事件管道
 
 `query.ts` 里核心的 `query()` 函数签名：
 
@@ -184,9 +186,9 @@ for await (const event of query(params)) {
 2. **资源复用**：整个智能体循环复用同一个 HTTP 连接的流式传输
 3. **透明性**：调用方不需要知道内部是单轮还是多轮——它只关心事件流
 
-### Zod 用于运行时类型安全
+### 工具输入校验容错：Zod Schema
 
-项目大量使用 [Zod](https://zod.dev/) 库定义数据 schema：
+Agent 的每一个工具调用参数都由 LLM 生成，天然不可信。项目大量使用 [Zod](https://zod.dev/) 定义工具输入 schema，在运行时做校验与容错：
 
 ```typescript
 // 工具输入 schema 示例（GrepTool）
@@ -198,14 +200,107 @@ const inputSchema = z.strictObject({
 })
 ```
 
-Zod 的作用：
-1. **运行时验证**：`inputSchema.safeParse(aiInput)` 确保 AI 传来的参数格式正确
-2. **TypeScript 类型推断**：`z.infer<typeof inputSchema>` 自动生成 TS 类型
-3. **描述即文档**：`.describe()` 注释会作为 tool schema 的一部分发给 AI，告诉 AI 每个参数的含义
+Zod 在 Agent 系统中承担三重职责：
+1. **运行时校验**：`inputSchema.safeParse(aiInput)` 拦截格式错误的工具参数，把校验错误回传给 LLM 而不是直接崩溃（容错）
+2. **TypeScript 类型推断**：`z.infer<typeof inputSchema>` 自动生成 TS 类型，工具实现拿到的是强类型输入
+3. **Schema 即提示词**：`.describe()` 注释会作为 tool schema 的一部分发给 AI，告诉 AI 每个参数的含义——校验规则同时也在"教" LLM 怎么正确调用工具
 
 ---
 
-## 1.6 项目比业界好在哪
+## 1.6 启动流程：Agent 系统如何就绪
+
+Agent 在接受第一条消息之前，需要完成三类与 Agent 能力直接相关的准备：**装配工具系统**、**加载项目记忆**、**接入外部工具（MCP）**。完整链路如下：
+
+```
+main.tsx 入口
+    │
+    ├── 解析命令行参数 (Commander.js)
+    │
+    ├── init()  ←── entrypoints/init.ts
+    │   └── 基础配置与环境初始化
+    │
+    ├── 加载工具系统
+    │   └── getTools(config)                 // 按 feature flag 组装工具列表
+    │
+    ├── 连接 MCP 服务器
+    │   └── 并行连接所有配置的 MCP servers
+    │       ├── stdio 传输（子进程）
+    │       ├── SSE 传输（HTTP 长连接）
+    │       └── WebSocket 传输
+    │
+    └── 启动 REPL
+        └── launchRepl() → ink React 渲染
+```
+
+### 工具装配：getTools()
+
+工具系统在启动时被集中初始化。`tools.ts` 的 `getTools()` 函数按 feature flag 和用户类型决定哪些工具可用：
+
+```typescript
+// tools.ts（简化）
+export function getTools(config: ToolsConfig): Tools {
+  const tools: Tool[] = [
+    BashTool,
+    FileReadTool,
+    FileEditTool,
+    FileWriteTool,
+    GlobTool,
+    GrepTool,
+    // ... 约 40 个工具
+  ]
+
+  // 仅 ant（Anthropic 内部）用户可用的工具
+  if (process.env.USER_TYPE === 'ant') {
+    if (REPLTool) tools.push(REPLTool)
+    if (SuggestBackgroundPRTool) tools.push(SuggestBackgroundPRTool)
+  }
+
+  // 仅特定 feature flag 开启时可用
+  if (SleepTool) tools.push(SleepTool)
+  if (cronTools.length) tools.push(...cronTools)
+
+  // MCP 动态工具（从连接的 MCP 服务器获取）
+  tools.push(...mcpTools)
+
+  return uniqBy(tools, t => t.name)
+}
+```
+
+注意 `uniqBy(tools, t => t.name)` 去重，防止重名工具导致 AI 调用混乱。feature flag 在这里的作用是**控制 Agent 的能力边界**：flag 未开启的工具不会进入工具列表，AI 从一开始就"不知道"这个能力存在，而不是调用时才被拒绝。
+
+### 项目记忆加载：CLAUDE.md
+
+启动时会扫描工作目录下的 `CLAUDE.md` 文件（以及父目录中的同名文件），作为"项目记忆"注入到系统提示：
+
+```typescript
+// utils/memdir/memdir.ts（简化）
+export async function loadMemoryPrompt(cwd: string): Promise<string> {
+  // 查找 CLAUDE.md 文件的路径层级
+  const paths = [
+    path.join(cwd, 'CLAUDE.md'),           // 项目级
+    path.join(homedir(), 'CLAUDE.md'),     // 用户全局级
+    // ... 还有中间目录
+  ]
+
+  const contents = await Promise.all(
+    paths.map(p => readFile(p).catch(() => null))
+  )
+
+  return contents.filter(Boolean).join('\n\n---\n\n')
+}
+```
+
+`CLAUDE.md` 的内容会附加到系统提示末尾，告诉 AI 项目的特定约定（比如"这个项目用 bun 不用 npm"、"所有提交必须通过 lint 检查"）。这是 Agent 适配具体项目环境的主要机制之一。
+
+### 外部工具接入：MCP 服务器连接
+
+启动时并行连接所有配置的 MCP 服务器（stdio / SSE / WebSocket 三种传输），连接成功后，每个 MCP Server 暴露的工具会被适配成 Claude Code 的 `Tool` 接口，合并进 `getTools()` 的工具列表。对 Agent 而言，MCP 工具与内置工具在调用方式上完全一致。
+
+---
+
+## 1.7 优势与不足
+
+### 与业界对比的优势
 
 | 维度 | 业界做法 | 本项目做法 | 本项目优势 |
 |------|----------|------------|------------|
@@ -216,9 +311,9 @@ Zod 的作用：
 | SDK 复用 | CLI 工具不可嵌入 | QueryEngine 提供 SDK 接口 | 可被 IDE 插件复用 |
 | 特性管理 | 维护多个分支 | Bun DCE + Feature Flag | 一套代码，多个版本 |
 
-## 1.7 本项目的不足
+### 不足
 
-1. **冷启动时间**：即使有并行预热优化，首次启动仍需 300-500ms，在 CI 频繁调用时累积开销显著。
-2. **`query.ts` 过度耦合**：约 1700 行的 `queryLoop` 函数把状态机、压缩、错误恢复、token 追踪全部耦合，极难维护。
-3. **Tool 接口过于复杂**：约 40 个方法/属性，对新工具开发者来说学习曲线陡峭。
+1. **`query.ts` 过度耦合**：约 1700 行的 `queryLoop` 函数把状态机、压缩、错误恢复、token 追踪全部耦合，极难维护。
+2. **Tool 接口过于复杂**：约 40 个方法/属性，对新工具开发者来说学习曲线陡峭。
+3. **MCP 连接阻塞工具可用性**：启动时需要等待所有 MCP 服务器连接完成（或超时）后工具列表才完整。如果用户配置了慢速/不稳定的 MCP 服务器，Agent 的可用工具会延迟就绪。更好的方案是"乐观启动"——先启动 REPL，MCP 工具在后台接入，连接成功后再增量更新工具列表。
 4. **无本地缓存语义索引**：目前的代码搜索依赖 ripgrep（文本搜索），没有持久化的 AST 索引，对于"找到所有实现了接口 X 的类"这类语义查询效率较低。

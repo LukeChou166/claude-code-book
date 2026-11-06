@@ -1,11 +1,11 @@
-# 第14章 错误处理与恢复机制
+# 第13章 错误处理与恢复机制
 
-> **前置知识**：第3章 QueryEngine、第4章 Agentic Loop  
+> **前置知识**：第2章 QueryEngine、第3章 Agentic Loop  
 > **关键文件**：`src/services/api/withRetry.ts`、`src/utils/gracefulShutdown.ts`、`src/utils/cleanupRegistry.ts`、`src/utils/abortController.ts`、`src/utils/errors.ts`、`src/remote/SessionsWebSocket.ts`
 
 ---
 
-## 14.1 解决什么问题
+## 13.1 解决什么问题
 
 AI 编程助手在生产环境中运行，会遭遇各种失败场景：
 
@@ -21,7 +21,7 @@ Claude Code 对每一层都有专属的处理策略，形成了一个多层防�
 
 ---
 
-## 14.2 业界的做法
+## 13.2 业界的做法
 
 | 策略 | 代表实现 | 优点 | 缺点 |
 |------|---------|------|------|
@@ -36,9 +36,9 @@ Claude Code 综合使用了以上大多数方案，针对不同层次采用不�
 
 ---
 
-## 14.3 本项目的做法（deep）
+## 13.3 本项目的做法（deep）
 
-### 14.3.1 层次结构总览
+### 13.3.1 层次结构总览
 
 ```
 ┌───────────────────────────────────────────────────────┐
@@ -58,7 +58,7 @@ Claude Code 综合使用了以上大多数方案，针对不同层次采用不�
 
 ---
 
-### 14.3.2 React 渲染层：两道错误边界
+### 13.3.2 React 渲染层：两道错误边界
 
 **第一道**：`SentryErrorBoundary`（`src/components/SentryErrorBoundary.ts`）
 
@@ -111,7 +111,7 @@ this.handleExit(error) → gracefulShutdown()
 
 ---
 
-### 14.3.3 API 调用层：withRetry（核心重试引擎）
+### 13.3.3 API 调用层：withRetry（核心重试引擎）
 
 `withRetry` 是整个项目最复杂的错误处理模块（约 400 行），以异步生成器实现：
 
@@ -291,7 +291,7 @@ while (remaining > 0) {
 
 ---
 
-### 14.3.4 WebSocket 层：SessionsWebSocket 自动重连
+### 13.3.4 WebSocket 层：SessionsWebSocket 自动重连
 
 远程会话（`claude assistant` 模式）通过 WebSocket 连接 Anthropic 服务器，`SessionsWebSocket.ts` 管理连接生命周期：
 
@@ -368,7 +368,7 @@ reconnect(): void {
 
 ---
 
-### 14.3.5 任务取消层：AbortController 树状级联
+### 13.3.5 任务取消层：AbortController 树状级联
 
 Claude Code 大量使用 `AbortController` 来取消正在进行的操作。`src/utils/abortController.ts` 提供了父子级联的工具函数：
 
@@ -461,7 +461,7 @@ try {
 
 ---
 
-### 14.3.6 进程退出层：gracefulShutdown（最后的防线）
+### 13.3.6 进程退出层：gracefulShutdown（最后的防线）
 
 `setupGracefulShutdown()` 在程序启动时调用一次（`memoize` 确保只执行一次），注册三个信号处理器：
 
@@ -617,7 +617,7 @@ function forceExit(exitCode: number): never {
 
 ---
 
-### 14.3.7 MCP 连接层的特殊错误处理
+### 13.3.7 MCP 连接层的特殊错误处理
 
 MCP 服务器的连接错误有其特殊性（`src/services/mcp/client.ts`）：
 
@@ -648,7 +648,7 @@ if (isTerminalConnectionError(error.message)) {
 
 ---
 
-### 14.3.8 错误分类：不同错误要不同对待
+### 13.3.8 错误分类：不同错误要不同对待
 
 `src/services/api/errors.ts` 提供了错误分类器：
 
@@ -671,7 +671,7 @@ export function classifyAPIError(error: unknown): string {
 
 ---
 
-## 14.4 失败路径与排障
+## 13.4 失败路径与排障
 
 ### 症状：API 调用一直重试，长时间不成功
 
@@ -705,7 +705,7 @@ sessionWebSocket.reconnect()
 
 ---
 
-## 14.5 优势与不足
+## 13.5 优势与不足
 
 ### 优势
 
@@ -731,7 +731,7 @@ sessionWebSocket.reconnect()
 
 ---
 
-## 14.6 在源码中找到这些逻辑
+## 13.6 在源码中找到这些逻辑
 
 | 功能 | 文件 | 关键函数 |
 |------|------|---------|

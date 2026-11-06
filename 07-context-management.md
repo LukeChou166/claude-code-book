@@ -1,11 +1,11 @@
-# 第8章 上下文管理与自动压缩
+# 第7章 上下文管理与自动压缩
 
-> **前置知识**：第4章 Agentic Loop、第3章 QueryEngine  
+> **前置知识**：第3章 Agentic Loop、第2章 QueryEngine  
 > **关键文件**：`src/services/compact/autoCompact.ts`、`src/services/compact/compact.ts`、`src/utils/tokens.ts`
 
 ---
 
-## 8.1 解决什么问题
+## 7.1 解决什么问题
 
 Claude 的上下文窗口是有限的（约 200k token）。一个复杂的编程任务可能需要：
 - 读取数十个文件（每个可能 2,000-10,000 token）
@@ -21,7 +21,7 @@ Claude 的上下文窗口是有限的（约 200k token）。一个复杂的编�
 
 ---
 
-## 8.2 业界的做法
+## 7.2 业界的做法
 
 | 方案 | 代表 | 优点 | 缺点 |
 |------|------|------|------|
@@ -32,7 +32,7 @@ Claude 的上下文窗口是有限的（约 200k token）。一个复杂的编�
 
 ---
 
-## 8.3 本项目的多层压缩策略
+## 7.3 本项目的多层压缩策略
 
 Claude Code 实现了一个**多层防线**的上下文管理体系：
 
@@ -51,15 +51,15 @@ Claude Code 实现了一个**多层防线**的上下文管理体系：
 
 ---
 
-## 8.4 防线 1：工具结果大小限制
+## 7.4 防线 1：工具结果大小限制
 
-在第5章中已经介绍：每个工具有 `maxResultSizeChars` 属性，超过阈值的结果写入临时文件。这是"在问题发生前"的预防。
+在第4章中已经介绍：每个工具有 `maxResultSizeChars` 属性，超过阈值的结果写入临时文件。这是"在问题发生前"的预防。
 
 `GrepTool` 的 `head_limit` 默认 250 行，防止大型代码库搜索产生几万行结果。
 
 ---
 
-## 8.5 防线 2：微压缩（MicroCompact）
+## 7.5 防线 2：微压缩（MicroCompact）
 
 微压缩处理**特别大的单个工具结果**：当某个工具调用的结果本身非常大（比如读取了一个 10,000 行的文件），微压缩会把它替换为更简洁的版本，同时保留关键信息。
 
@@ -84,7 +84,7 @@ queryCheckpoint('query_microcompact_end')
 
 ---
 
-## 8.6 防线 3：工具结果预算（Tool Result Budget）
+## 7.6 防线 3：工具结果预算（Tool Result Budget）
 
 ```typescript
 // src/query.ts 第 369-394 行
@@ -107,7 +107,7 @@ messagesForQuery = await applyToolResultBudget(
 
 ---
 
-## 8.7 防线 4：自动压缩（AutoCompact）—— 最重要的防线
+## 7.7 防线 4：自动压缩（AutoCompact）—— 最重要的防线
 
 AutoCompact 是整个上下文管理体系的核心，它在 token 使用量接近阈值时，自动调用 Claude 生成一个**会话摘要**，然后用摘要替换旧历史。
 
@@ -228,7 +228,7 @@ export function stripImagesFromMessages(messages: Message[]): Message[] {
 
 ---
 
-## 8.8 防线 5：阻塞限制
+## 7.8 防线 5：阻塞限制
 
 如果自动压缩被禁用，或者连续多次压缩失败，token 使用量达到"阻塞限制"时：
 
@@ -251,7 +251,7 @@ if (isAtBlockingLimit) {
 
 ---
 
-## 8.9 Token 计数：估算与精确值
+## 7.9 Token 计数：估算与精确值
 
 Claude Code 维护两种 token 计数：
 
@@ -278,7 +278,7 @@ export function tokenCountWithEstimation(messages: Message[]): number {
 
 ---
 
-## 8.10 压缩进度 UI
+## 7.10 压缩进度 UI
 
 压缩是一个耗时操作（可能需要 5-30 秒），用户需要知道正在发生什么：
 
@@ -296,7 +296,7 @@ type CompactProgressEvent =
 
 ---
 
-## 8.11 Prompt Cache 与压缩的交互
+## 7.11 Prompt Cache 与压缩的交互
 
 Claude API 支持 Prompt Cache：如果连续两次调用的系统提示相同，第二次命中缓存，输入 token 费用降低约 90%。
 
@@ -314,7 +314,7 @@ export function notifyCompaction() {
 
 ---
 
-## 8.12 优势与不足
+## 7.12 优势与不足
 
 ### 优势
 

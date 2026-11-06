@@ -1,11 +1,11 @@
-# 第4章 Agentic Loop：智能体核心循环
+# 第3章 Agentic Loop：智能体核心循环
 
-> **前置知识**：第1章整体架构、第3章 QueryEngine  
+> **前置知识**：第1章 整体架构与启动、第2章 QueryEngine  
 > **关键文件**：`src/query.ts`（约1730行）、`src/services/tools/toolOrchestration.ts`、`src/services/tools/toolExecution.ts`
 
 ---
 
-## 4.1 解决什么问题
+## 3.1 解决什么问题
 
 这是整个项目最关键的一章。
 
@@ -23,7 +23,7 @@
 
 ---
 
-## 4.2 业界的做法
+## 3.2 业界的做法
 
 **OpenAI Assistants API** 将 agentic loop 托管在服务端——客户端只需轮询 run 的状态。
 - 优点：客户端代码简单
@@ -39,7 +39,7 @@
 
 ---
 
-## 4.3 本项目的做法：本地驱动的流式循环
+## 3.3 本项目的做法：本地驱动的流式循环
 
 `query.ts` 中的 `queryLoop()` 实现了完全在**客户端驱动**的 Agentic Loop，约 1700 行代码。
 
@@ -105,7 +105,7 @@ continue  // 进入下一轮
 
 ---
 
-## 4.4 工具并发执行
+## 3.4 工具并发执行
 
 当 AI 返回多个 tool_use 块时，`toolOrchestration.ts` 负责协调执行：
 
@@ -174,7 +174,7 @@ async function* runToolsConcurrently(
 
 ---
 
-## 4.5 流式响应处理
+## 3.5 流式响应处理
 
 API 响应是流式的，每个 chunk 可能包含：
 - 文本 token（AI 的回复文字）
@@ -199,7 +199,7 @@ let streamingToolExecutor = useStreamingToolExecution
 
 ---
 
-## 4.6 Thinking 模式的特殊规则
+## 3.6 Thinking 模式的特殊规则
 
 注释里有一段带有幽默感的"圣经"风格警告：
 
@@ -234,7 +234,7 @@ Claude 的"扩展思考"功能在响应中产生两种特殊块：
 
 ---
 
-## 4.7 max_output_tokens 恢复机制
+## 3.7 max_output_tokens 恢复机制
 
 当 Claude 生成的回复超过 `max_output_tokens` 限制时（比如写了特别长的代码），API 返回带有 `apiError: 'max_output_tokens'` 的消息。
 
@@ -261,7 +261,7 @@ function isWithheldMaxOutputTokens(
 
 ---
 
-## 4.8 降级模型（Fallback Model）
+## 3.8 降级模型（Fallback Model）
 
 当主模型（比如 `claude-opus-4-5`）调用失败时，自动切换到 `fallbackModel`（比如 `claude-sonnet-4-5`）。
 
@@ -295,7 +295,7 @@ if (streamingFallbackOccured) {
 
 ---
 
-## 4.9 Stop Hooks：自定义循环终止逻辑
+## 3.9 Stop Hooks：自定义循环终止逻辑
 
 当 AI 决定结束（没有 tool_use，纯文本回复）时，Claude Code 会运行"Stop Hooks"：
 
@@ -324,7 +324,7 @@ Stop Hooks 让用户可以在 AI 想要结束时插入自定义检查，比如�
 
 ---
 
-## 4.10 终止条件总结
+## 3.10 终止条件总结
 
 循环退出有以下情况：
 
@@ -339,7 +339,7 @@ Stop Hooks 让用户可以在 AI 想要结束时插入自定义检查，比如�
 
 ---
 
-## 4.11 优势与不足
+## 3.11 优势与不足
 
 ### 优势
 

@@ -1,6 +1,6 @@
 # 第10章 会话持久化与恢复
 
-> **前置知识**：第3章 QueryEngine、第4章 Agentic Loop  
+> **前置知识**：第2章 QueryEngine、第3章 Agentic Loop  
 > **关键文件**：`src/utils/sessionStorage.ts`（约5100行）、`src/commands/resume/`、`src/types/logs.ts`
 
 ---
